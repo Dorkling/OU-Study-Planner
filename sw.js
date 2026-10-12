@@ -1,5 +1,5 @@
 // bump when files change
-const version = 'v5'
+const version = 'v12'
 
 const files = [
   './',
@@ -38,6 +38,7 @@ const files = [
   'js/components/work-pattern.js',
   'js/components/tutorial-form.js',
   'js/components/zone-picker.js',
+  'js/components/capacity-note.js',
   'js/screens/setup.js',
   'js/screens/today.js',
   'js/screens/week.js',
@@ -48,7 +49,8 @@ const files = [
 ]
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(version).then(cache => cache.addAll(files)))
+  // skip the browser cache so a new version never installs old files
+  event.waitUntil(caches.open(version).then(cache => cache.addAll(files.map(file => new Request(file, { cache: 'reload' })))))
   self.skipWaiting()
 })
 
@@ -61,15 +63,18 @@ self.addEventListener('activate', event => {
 })
 
 // network first, cache when offline
+// no-cache asks the server if each file changed, so an upload never mixes old and new files
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url)
   if (event.request.method !== 'GET' || url.origin !== location.origin) return
 
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request.url, { cache: 'no-cache' })
       .then(response => {
-        const copy = response.clone()
-        caches.open(version).then(cache => cache.put(event.request, copy))
+        if (response.ok) {
+          const copy = response.clone()
+          caches.open(version).then(cache => cache.put(event.request, copy))
+        }
         return response
       })
       .catch(() => caches.match(event.request, { ignoreSearch: true }))

@@ -297,3 +297,40 @@ h3 { font-size: 1rem; margin: 1.25rem 0 .5rem; }
 /* privacy page */
 .prose { max-width: 42rem; }
 .prose h2 { margin-top: 1.5rem; }
+
+/* blocks that clash with work, blocked time or study hours */
+.fc-event.ev-clash { outline: 2px solid var(--danger); outline-offset: -2px; }
+.swatch.ev-clash-key { background: transparent; border: 2px solid var(--danger); }
+
+/* month view */
+.fc .fc-daygrid-day-number { color: var(--accent); }
+.fc .fc-daygrid-event { font-size: .8rem; }
+
+/* study days table */
+.days { display: grid; gap: .4rem; margin-bottom: 1rem; }
+.day-row { display: grid; grid-template-columns: 9rem 7rem 7rem 6rem auto; gap: .5rem; align-items: center; }
+.day-row .check { margin: 0; }
+.day-head { font-size: .85rem; color: var(--muted); }
+.day-row.off input[type="time"], .day-row.off input[type="number"] { opacity: .4; }
+
+@media (max-width: 600px) {
+  .day-row { grid-template-columns: 1fr 1fr; }
+  .day-row > .check:first-child { grid-column: 1 / -1; font-weight: 600; }
+  .day-head { display: none; }
+  .day-row { padding: .5rem 0; border-top: 1px solid var(--border); }
+}
+
+/* more options */
+details summary { cursor: pointer; font-weight: 600; font-size: 1.1rem; }
+details[open] summary { margin-bottom: .75rem; }
+.plan-range { display: flex; gap: .4rem; }
+
+/* submitted assessments */
+.fc-event.ev-submitted { opacity: .45; text-decoration: line-through; }
+.list li .submitted { margin: 0 0 0 auto; font-size: .9rem; }
+
+/* catch up form inside a module card */
+.panel-inline { border: 1px solid var(--accent); border-radius: 8px; padding: .75rem; margin-bottom: 1rem; }
+.panel-inline .row label { display: flex; flex-direction: column; gap: .25rem; font-size: .9rem; }
+.panel-inline input[type="number"] { width: 6rem; }
+.catch-up { color: var(--accent); }

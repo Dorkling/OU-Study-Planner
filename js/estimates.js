@@ -6,8 +6,13 @@ export function moduleHours(module, hoursPerCredit) {
 }
 
 // spread evenly from start to end
-export function weeklyHours(module, hoursPerCredit) {
+export function suggestedWeekly(module, hoursPerCredit) {
   return moduleHours(module, hoursPerCredit) / weeksBetween(module.start, module.end)
+}
+
+// the user's own weekly hours if set, otherwise the suggestion
+export function weeklyHours(module, hoursPerCredit) {
+  return module.weekly_hours > 0 ? module.weekly_hours : suggestedWeekly(module, hoursPerCredit)
 }
 
 export function oneDecimal(n) {

@@ -71,6 +71,9 @@ const App = {
 await loadSettings()
 createApp(App).mount('#app')
 
+// started fine, so a later mixed update can reload again
+try { sessionStorage.removeItem('reloaded') } catch {}
+
 startSync()
 startReminders()
 startAutoPlan()

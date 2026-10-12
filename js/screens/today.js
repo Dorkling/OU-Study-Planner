@@ -1,18 +1,27 @@
 import { live, loadAll, save } from '../db.js'
 import { settings } from '../settings.js'
-import { getNeeds, getModuleNeeds, checkRisks } from '../planner.js'
+import { getNeeds, moduleWeekSummary, checkRisks, findClashes } from '../planner.js'
+import CapacityNote from '../components/capacity-note.js'
 import { shortDate, clockTime, dateKey, weekBounds, hoursBetween } from '../time.js'
 import { oneDecimal } from '../estimates.js'
-import { markDone, markMissed, markAttended, markMissedTutorial } from '../progress.js'
+import { markDone, markMissed, markAttended, markMissedTutorial, moveClashes, markSubmitted } from '../progress.js'
 
 const { ref, computed } = Vue
 
 const day = 86400000
 
 export default {
+  components: { CapacityNote },
   template: `
     <section v-if="data">
       <h1>Today</h1>
+
+      <CapacityNote />
+
+      <div v-if="clashes.length" class="notice warn">
+        <p>{{ clashes.length }} study {{ clashes.length === 1 ? 'block clashes' : 'blocks clash' }} with your work, blocked time or study hours. <a href="#/week">See the week</a></p>
+        <div class="actions"><button @click="moveAll">Move {{ clashes.length === 1 ? 'it' : 'them' }}</button></div>
+      </div>
 
       <div v-if="risks.length" class="notice warn">
         <p v-for="r in risks">{{ label(r.assessment.module_id, r.assessment.id) }} is at risk: about {{ r.hours }} h won't fit before {{ dayText(r.target) }}.</p>
@@ -66,7 +75,10 @@ export default {
                 {{ oneDecimal(n.done) }} of {{ oneDecimal(n.total) }} h done<template v-if="atRisk(n)">, at risk</template><template v-else>, on track</template>
               </p>
             </div>
-            <a :href="'#/assessment/' + n.assessment.id">Parts</a>
+            <div class="actions">
+              <button class="link" @click="markSubmitted(n.assessment, true)">{{ n.assessment.type === 'exam' ? 'Done' : 'Submitted' }}</button>
+              <a :href="'#/assessment/' + n.assessment.id">Parts</a>
+            </div>
           </li>
         </ul>
       </div>
@@ -87,7 +99,8 @@ export default {
             <div class="grow">
               <strong>{{ code(m.module_id) }}</strong>
               <div class="progress"><span :style="{ width: Math.min(100, m.covered / m.weekly * 100) + '%' }"></span></div>
-              <p class="hint">{{ oneDecimal(m.covered) }} of about {{ oneDecimal(m.weekly) }} h booked or done</p>
+              <p class="hint">{{ oneDecimal(m.covered) }} of about {{ oneDecimal(m.weekly) }} h booked or suggested<template v-if="m.catchUp"> (with {{ m.catchUp }} h catch up)</template></p>
+              <p v-if="m.short" class="hint error">{{ oneDecimal(m.short) }} h short, with no free time left this week</p>
             </div>
           </li>
         </ul>
@@ -143,6 +156,10 @@ export default {
     })
 
     const risks = computed(() => checkRisks(data.value, settings, new Date()))
+
+    // suggestions tidy themselves, accepted blocks need a nudge
+    const clashes = computed(() => findClashes(data.value, settings, new Date()).filter(c => c.block.state === 'accepted'))
+    const moveAll = () => moveClashes(clashes.value.map(c => c.block))
     const atRisk = n => risks.value.some(r => r.assessment.id === n.assessment.id)
 
     const dueSoon = computed(() => getNeeds(data.value, settings, new Date())
@@ -153,12 +170,12 @@ export default {
     const finishTodo = t => save('tasks', { ...t, status: 'done' })
 
     const moduleWeek = computed(() => settings.trackOptional
-      ? getModuleNeeds(data.value, settings, weekBounds(new Date(), zone()), data.value.blocks)
+      ? moduleWeekSummary(data.value, settings, weekBounds(new Date(), zone()), new Date())
       : [])
 
     return {
-      data, spent, replanned, risks, checkIns, tutorialCheckIns, upcoming, dueSoon, todos, moduleWeek,
-      code, label, dayText, whenText, oneDecimal, blockLength, atRisk, done, missed, finishTodo, markAttended, markMissedTutorial
+      data, spent, replanned, risks, clashes, moveAll, checkIns, tutorialCheckIns, upcoming, dueSoon, todos, moduleWeek,
+      code, label, dayText, whenText, oneDecimal, blockLength, atRisk, done, missed, finishTodo, markAttended, markMissedTutorial, markSubmitted
     }
   }
 }

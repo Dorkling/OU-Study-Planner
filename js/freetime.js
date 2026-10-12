@@ -63,20 +63,32 @@ export function subtractTimes(free, busy) {
   return result
 }
 
+// study settings for a weekday, falling back to the older single window and days off
+export function dayPlan(settings, weekday) {
+  return settings.days?.[weekday] || {
+    study: !(settings.daysOff || []).includes(weekday),
+    start: settings.studyWindow?.start,
+    end: settings.studyWindow?.end,
+    maxHours: settings.maxHoursPerDay,
+    preferred: false
+  }
+}
+
 // study window for each day
 export function buildStudyGrid(from, to, shifts, settings) {
   const zone = settings.timeZone
   const grid = []
 
   for (let key = dateKey(from, zone); startOfDay(key, zone) < to; key = addDaysToKey(key, 1)) {
-    if (settings.daysOff.includes(weekdayOf(key))) continue
+    const plan = dayPlan(settings, weekdayOf(key))
+    if (!plan.study) continue
 
     // a work day is any day a shift starts on
     const workDay = shifts.some(s => dateKey(s.start, zone) === key)
     if (workDay && !settings.studyOnWorkDays) continue
 
-    const window = workDay ? settings.workDayWindow : settings.studyWindow
-    grid.push({ ...clockRange(key, window.start, window.end, zone), key, workDay })
+    const window = workDay ? settings.workDayWindow : plan
+    grid.push({ ...clockRange(key, window.start, window.end, zone), key, workDay, preferred: !workDay && plan.preferred })
   }
 
   return grid

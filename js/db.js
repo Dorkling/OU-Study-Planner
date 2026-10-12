@@ -31,6 +31,14 @@ export async function save(table, record) {
   return row
 }
 
+// add several records in one go
+export async function saveMany(table, records) {
+  const now = Date.now()
+  const rows = JSON.parse(JSON.stringify(records)).map(row => ({ ...row, id: row.id || crypto.randomUUID(), updated: now, deleted: false }))
+  await db[table].bulkPut(rows)
+  return rows
+}
+
 // soft delete so sync can pass it on
 export function remove(table, ids) {
   const list = Array.isArray(ids) ? ids : [ids]

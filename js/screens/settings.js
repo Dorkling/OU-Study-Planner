@@ -1,6 +1,7 @@
 import { all, save, remove, live } from '../db.js'
 import { settings, saveSetting } from '../settings.js'
 import { dayNames, weekOrder, dateKey, defaultZone, deviceZone } from '../time.js'
+import { dayPlan } from '../freetime.js'
 import WorkPattern from '../components/work-pattern.js'
 import ZonePicker from '../components/zone-picker.js'
 import { downloadBackup, restoreBackup } from '../backup.js'
@@ -64,7 +65,7 @@ export default {
       </div>
 
       <div class="card">
-        <h2>Study planning</h2>
+        <h2>Planning</h2>
         <div class="grid">
           <label>Planner mode
             <select v-model="settings.plannerMode" @change="put('plannerMode')">
@@ -76,46 +77,71 @@ export default {
           </label>
           <label>How to plan
             <select v-model="settings.planStyle" @change="put('planStyle')">
-              <option value="spread">Spread evenly up to the target</option>
-              <option value="early">As early as possible</option>
+              <option value="spread">Spread it out up to the deadline</option>
+              <option value="early">Get it done as early as possible</option>
             </select>
           </label>
-          <label>Earliest study time <input type="time" v-model="settings.studyWindow.start" @change="put('studyWindow')"></label>
-          <label>Latest study time <input type="time" v-model="settings.studyWindow.end" @change="put('studyWindow')"></label>
-          <label>Max study hours a day <input type="number" v-model.number="settings.maxHoursPerDay" @change="put('maxHoursPerDay')" min="0" step="0.5"></label>
-          <label>Shortest block (min) <input type="number" v-model.number="settings.minBlock" @change="put('minBlock')" min="15" step="15"></label>
-          <label>Longest block (min) <input type="number" v-model.number="settings.maxBlock" @change="put('maxBlock')" min="15" step="15"></label>
-          <label>Break between blocks (min) <input type="number" v-model.number="settings.breakMins" @change="put('breakMins')" min="0" step="5"></label>
-          <label>Travel either side of shifts (min) <input type="number" v-model.number="settings.travelBuffer" @change="put('travelBuffer')" min="0" step="5"></label>
-          <label>Finish TMAs this many days early <input type="number" v-model.number="settings.tmaBuffer" @change="put('tmaBuffer')" min="0"></label>
-          <label>Study hours per credit <input type="number" v-model.number="settings.hoursPerCredit" @change="put('hoursPerCredit')" min="1"></label>
-          <label>Default hours per TMA <input type="number" v-model.number="settings.hoursPerTma" @change="put('hoursPerTma')" min="1"></label>
-          <label>EMA and exam revision
-            <select v-model="settings.revisionMode" @change="put('revisionMode')">
-              <option value="planned">Planned to a total, like TMAs</option>
-              <option value="weekly">A fixed amount each week</option>
-            </select>
-          </label>
-          <label v-if="settings.revisionMode === 'planned'">Default revision hours for an EMA or exam <input type="number" v-model.number="settings.hoursPerExam" @change="put('hoursPerExam')" min="1"></label>
-          <label v-else>Revision hours each week <input type="number" v-model.number="settings.revisionHours" @change="put('revisionHours')" min="0" step="0.5"></label>
+        </div>
+        <label class="check"><input type="checkbox" v-model="settings.trackOptional" @change="put('trackOptional')"> Plan weekly module study from credits</label>
+        <p class="hint">Adds general study (reading, activities) to reach each module's weekly hours. TMA work and tutorials count toward it.</p>
+      </div>
+
+      <div class="card">
+        <h2>When you study</h2>
+        <p class="hint">Tick the days you study and when you're free. Preferred days get filled first, so give a day you like a long session more hours.</p>
+        <div class="days">
+          <div class="day-row day-head" aria-hidden="true">
+            <span>Day</span><span>From</span><span>To</span><span>Max hours</span><span></span>
+          </div>
+          <div v-for="d in dayRows" :key="d.weekday" class="day-row" :class="{ off: !d.study }">
+            <label class="check"><input type="checkbox" :checked="d.study" @change="editDay(d.weekday, 'study', $event.target.checked)"> {{ dayNames[d.weekday] }}</label>
+            <input type="time" :value="d.start" :disabled="!d.study" @change="editDay(d.weekday, 'start', $event.target.value)" :aria-label="dayNames[d.weekday] + ' from'">
+            <input type="time" :value="d.end" :disabled="!d.study" @change="editDay(d.weekday, 'end', $event.target.value)" :aria-label="dayNames[d.weekday] + ' to'">
+            <input type="number" :value="d.maxHours" :disabled="!d.study" min="0.5" step="0.5" @change="editDay(d.weekday, 'maxHours', Number($event.target.value))" :aria-label="dayNames[d.weekday] + ' max hours'">
+            <label class="check"><input type="checkbox" :checked="d.preferred" :disabled="!d.study" @change="editDay(d.weekday, 'preferred', $event.target.checked)"> Preferred</label>
+          </div>
         </div>
 
-        <label class="check"><input type="checkbox" v-model="settings.studyOnWorkDays" @change="put('studyOnWorkDays')"> Study on work days</label>
-        <div v-if="settings.studyOnWorkDays" class="grid">
+        <h3>On days you work</h3>
+        <div class="segmented" role="radiogroup" aria-label="Study on work days">
+          <label><input type="radio" :value="false" v-model="settings.studyOnWorkDays" @change="put('studyOnWorkDays')"> Don't study</label>
+          <label><input type="radio" :value="true" v-model="settings.studyOnWorkDays" @change="put('studyOnWorkDays')"> Study as well</label>
+        </div>
+        <div v-if="settings.studyOnWorkDays" class="grid spaced-top">
           <label>From <input type="time" v-model="settings.workDayWindow.start" @change="put('workDayWindow')"></label>
           <label>Until <input type="time" v-model="settings.workDayWindow.end" @change="put('workDayWindow')"></label>
           <label>Max hours <input type="number" v-model.number="settings.workDayMaxHours" @change="put('workDayMaxHours')" min="0" step="0.5"></label>
         </div>
+        <label class="stack spaced-top">Travel time either side of a shift (minutes) <input type="number" v-model.number="settings.travelBuffer" @change="put('travelBuffer')" min="0" step="5"></label>
+      </div>
 
-        <fieldset>
-          <legend>Days off from study</legend>
-          <label v-for="d in weekOrder" class="check">
-            <input type="checkbox" :value="d" v-model="settings.daysOff" @change="put('daysOff')"> {{ dayNames[d] }}
-          </label>
-        </fieldset>
+      <div class="card">
+        <h2>Study blocks</h2>
+        <div class="grid">
+          <label>Shortest block (minutes) <input type="number" v-model.number="settings.minBlock" @change="put('minBlock')" min="15" step="15"></label>
+          <label>Longest block (minutes) <input type="number" v-model.number="settings.maxBlock" @change="put('maxBlock')" min="15" step="15"></label>
+          <label>Break between blocks (minutes) <input type="number" v-model.number="settings.breakMins" @change="put('breakMins')" min="0" step="5"></label>
+        </div>
+      </div>
 
-        <label class="check"><input type="checkbox" v-model="settings.trackOptional" @change="put('trackOptional')"> Plan weekly module study from credits</label>
-        <p class="hint">Adds general study (reading, activities) to reach each module's weekly hours. TMA work and tutorials count toward it.</p>
+      <div class="card">
+        <details>
+          <summary>More options</summary>
+          <p class="hint">Estimates the planner starts from. Most people won't need to change these.</p>
+          <div class="grid">
+            <label>Finish TMAs this many days early <input type="number" v-model.number="settings.tmaBuffer" @change="put('tmaBuffer')" min="0"></label>
+            <label>Study hours per credit <input type="number" v-model.number="settings.hoursPerCredit" @change="put('hoursPerCredit')" min="1"></label>
+            <label>Default hours per TMA <input type="number" v-model.number="settings.hoursPerTma" @change="put('hoursPerTma')" min="1"></label>
+            <label>EMA and exam revision
+              <select v-model="settings.revisionMode" @change="put('revisionMode')">
+                <option value="planned">Planned to a total, like TMAs</option>
+                <option value="weekly">A fixed amount each week</option>
+              </select>
+            </label>
+            <label v-if="settings.revisionMode === 'planned'">Revision hours for an EMA or exam <input type="number" v-model.number="settings.hoursPerExam" @change="put('hoursPerExam')" min="1"></label>
+            <label v-else>Revision hours each week <input type="number" v-model.number="settings.revisionHours" @change="put('revisionHours')" min="0" step="0.5"></label>
+          </div>
+        </details>
       </div>
 
       <div class="card">
@@ -212,6 +238,16 @@ export default {
       manual: 'Shows free time and hours left, you place every block'
     }
 
+    const dayRows = computed(() => weekOrder.map(weekday => ({ weekday, ...dayPlan(settings, weekday) })))
+
+    // save the whole week so the older single study window turns into per day settings
+    function editDay(weekday, field, value) {
+      if ((field === 'start' || field === 'end') && !value) return
+      const days = Object.fromEntries(weekOrder.map(d => [d, { ...dayPlan(settings, d) }]))
+      days[weekday][field] = value
+      put('days', days)
+    }
+
     const device = deviceZone()
     const zoneName = z => z === defaultZone ? 'UK time' : z.replace(/_/g, ' ').replace(/\//g, ', ')
 
@@ -296,7 +332,7 @@ export default {
     }
 
     return {
-      settings, exceptions, blocked, modeHints, device, defaultZone, zoneName, themes,
+      settings, exceptions, blocked, modeHints, dayRows, editDay, device, defaultZone, zoneName, themes,
       reminderError, driveError, restoreMode, restoreMessage, restoreFailed, syncState, syncText,
       canNotify, toggleReminders, drive, connectDrive, reconnectDrive, disconnectDrive, syncNow,
       driveAvailable, downloadBackup, restore, dayNames, weekOrder, put, update, addException, addBlocked, setRepeat, remove

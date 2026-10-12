@@ -5,13 +5,14 @@ import { shortDate } from '../time.js'
 import ModuleForm from '../components/module-form.js'
 import AssessmentForm from '../components/assessment-form.js'
 import WorkPattern from '../components/work-pattern.js'
+import CapacityNote from '../components/capacity-note.js'
 
 const { ref, computed } = Vue
 
 const typeNames = { tma: 'TMA', ema: 'EMA', exam: 'Exam' }
 
 export default {
-  components: { ModuleForm, AssessmentForm, WorkPattern },
+  components: { ModuleForm, AssessmentForm, WorkPattern, CapacityNote },
   template: `
     <section class="setup">
       <h1>Set up your planner</h1>
@@ -71,6 +72,7 @@ export default {
       <template v-else>
         <p>Add the shifts you work in a normal week. Holidays and swaps go in Settings later.</p>
         <div class="card"><WorkPattern /></div>
+        <CapacityNote show-ok />
         <div class="actions spaced">
           <button class="primary" @click="finish">Finish</button>
           <button @click="step = 2">Back</button>

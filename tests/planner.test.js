@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks } from '../js/planner.js'
+import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours } from '../js/planner.js'
 
 import { zonedTime } from '../js/time.js'
 
@@ -243,4 +243,180 @@ test('switching to auto turns old suggestions into planned blocks even in the sa
   const auto = planWeek({ ...emptyWeek, modules: [{ ...module, mode_override: 'auto' }], blocks: suggestions }, planSettings, at(12, 8), at(12, 8), ['auto'])
   assert.equal(auto.unchanged, false)
   assert.equal(auto.remove.length, suggestions.length)
+})
+
+// the week from james's screenshot: shifts tue, fri and sun, dnd friday night, study from 12:00
+const shiftWeek = {
+  ...emptyWeek,
+  pattern: [2, 5, 0].map(weekday => ({ weekday, start: '11:00', end: '20:00' })),
+  blocked: [{ weekday: 5, start: '20:00', end: '00:00', label: 'DnD' }]
+}
+const noonStart = { ...planSettings, studyWindow: { start: '12:00', end: '21:00' } }
+const block = (id, day, from, to, extra = {}) => ({ id, module_id: 'm1', state: 'accepted', start: at(day, ...from).toISOString(), end: at(day, ...to).toISOString(), ...extra })
+
+test('the planner keeps to study hours and off work days', () => {
+  const { blocks } = planWeek(shiftWeek, noonStart, at(12, 20, 50), at(12, 20, 50))
+  for (const b of blocks) {
+    const start = new Date(b.start)
+    assert.ok(![13, 16, 18].includes(Number(new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: 'Europe/London' }).format(start))), 'not on a work day')
+    assert.ok(Number(new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hourCycle: 'h23', timeZone: 'Europe/London' }).format(start)) >= 12, 'not before 12:00')
+  }
+})
+
+test('old blocks under a shift or outside study hours are found', () => {
+  const data = {
+    ...shiftWeek,
+    blocks: [
+      block('during-work', 18, [12, 45], [13, 30]),
+      block('morning', 14, [9, 0], [12, 0]),
+      block('fine', 15, [17, 0], [18, 0]),
+      block('dnd', 16, [21, 0], [22, 0], { byUser: true }),
+      block('placed-early', 15, [9, 0], [10, 0], { byUser: true }),
+      block('past', 11, [9, 0], [10, 0])
+    ]
+  }
+  const clashes = findClashes(data, noonStart, at(12, 20, 50))
+  assert.deepEqual(clashes.map(c => [c.block.id, c.reason]), [['during-work', 'busy'], ['morning', 'hours'], ['dnd', 'busy']])
+})
+
+test('travel time either side of a shift counts as a clash', () => {
+  const data = { ...shiftWeek, blocks: [block('just-before', 16, [10, 0], [10, 45], { byUser: true })] }
+  assert.equal(findClashes(data, noonStart, at(12, 20, 50)).length, 1)
+})
+
+const weekOfDate = b => new Date(b.start) >= at(19, 0) ? 'next' : 'this'
+
+test('planning next week only books next week and leaves this week alone', () => {
+  const thisWeek = planWeek(emptyWeek, planSettings, at(12, 8), at(12, 8)).blocks.map((b, i) => ({ ...b, id: `t${i}` }))
+  const next = planWeek({ ...emptyWeek, blocks: thisWeek }, planSettings, at(12, 8), at(20, 8))
+
+  assert.ok(next.blocks.length > 0)
+  assert.ok(next.blocks.every(b => weekOfDate(b) === 'next'))
+  assert.equal(next.remove.length, 0)
+})
+
+test('replanning this week keeps the auto blocks already in next week', () => {
+  const data = { ...emptyWeek, modules: [{ ...module, mode_override: 'auto' }] }
+  const nextWeek = planWeek(data, planSettings, at(12, 8), at(20, 8)).blocks.map((b, i) => ({ ...b, id: `n${i}` }))
+  const thisWeek = planWeek({ ...data, blocks: nextWeek }, planSettings, at(12, 8), at(12, 8), ['auto'])
+  assert.ok(nextWeek.every(b => !thisWeek.remove.includes(b.id)))
+})
+
+test('suggestions in another week count as planned', () => {
+  const data = { ...emptyWeek, assessments: [{ ...tma('t1', 30), type: 'tma' }] }
+  const settingsNoStudy = { ...planSettings, trackOptional: false, hoursPerTma: 4 }
+  const nextWeek = planWeek(data, settingsNoStudy, at(12, 8), at(20, 8)).blocks.map((b, i) => ({ ...b, id: `n${i}` }))
+  const booked = nextWeek.reduce((sum, b) => sum + hours(b), 0)
+  const thisWeek = planWeek({ ...data, blocks: nextWeek }, settingsNoStudy, at(12, 8), at(12, 8))
+  assert.equal(booked + thisWeek.blocks.reduce((sum, b) => sum + hours(b), 0), 4)
+})
+
+test('the planner books the weekly hours the user chose', () => {
+  const data = { ...emptyWeek, modules: [{ ...module, weekly_hours: 6 }] }
+  const { blocks } = planWeek(data, planSettings, at(12, 8), at(12, 8))
+  assert.equal(blocks.reduce((sum, b) => sum + hours(b), 0), 6)
+})
+
+// evenings on weekdays, a long preferred saturday, sunday off
+const weekdayEvening = { study: true, start: '18:00', end: '21:00', maxHours: 1, preferred: false }
+const days = {
+  1: weekdayEvening, 2: weekdayEvening, 3: weekdayEvening, 4: weekdayEvening, 5: weekdayEvening,
+  6: { study: true, start: '10:00', end: '16:00', maxHours: 5, preferred: true },
+  0: { study: false, start: '10:00', end: '16:00', maxHours: 0, preferred: false }
+}
+const dayLabel = b => new Intl.DateTimeFormat('en-GB', { weekday: 'short', timeZone: 'Europe/London' }).format(new Date(b.start))
+const hoursOn = (blocks, day) => blocks.filter(b => dayLabel(b) === day).reduce((sum, b) => sum + hours(b), 0)
+
+test('each day keeps to its own times and limit, and a day off gets nothing', () => {
+  const { blocks } = planWeek(emptyWeek, { ...planSettings, days }, at(12, 8), at(12, 8))
+  assert.equal(hoursOn(blocks, 'Sun'), 0)
+  assert.ok(hoursOn(blocks, 'Mon') <= 1)
+  assert.ok(hoursOn(blocks, 'Sat') <= 5)
+  for (const b of blocks.filter(b => dayLabel(b) !== 'Sat')) {
+    const hour = Number(new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hourCycle: 'h23', timeZone: 'Europe/London' }).format(new Date(b.start)))
+    assert.ok(hour >= 18, 'weekday blocks are in the evening')
+  }
+})
+
+test('preferred days are filled before other days', () => {
+  const data = { ...emptyWeek, assessments: [{ ...tma('t1', 30), type: 'tma' }] }
+  const { blocks } = planWeek(data, { ...planSettings, days, hoursPerTma: 5, trackOptional: false }, at(12, 8), at(12, 8))
+  assert.equal(hoursOn(blocks, 'Sat'), 5)
+  assert.equal(blocks.reduce((sum, b) => sum + hours(b), 0), 5)
+})
+
+test('planning to the end spreads the work over the weeks without booking it twice', () => {
+  const data = { ...emptyWeek, modules: [module], assessments: [{ id: 'big', module_id: 'm1', type: 'tma', title: 'TMA', due: at(31, 12).toISOString() }] }
+  const settingsTma = { ...planSettings, planStyle: 'spread', trackOptional: false, hoursPerTma: 12, tmaBuffer: 0 }
+  const weeks = weeksToEnd({ ...data, modules: [{ ...module, end: '2026-10-31' }] }, settingsTma, at(12, 8))
+  assert.equal(weeks, 3)
+
+  const { blocks } = planWeeks(data, settingsTma, at(12, 8), at(12, 8), weeks)
+  const weekIndex = b => Math.floor((new Date(b.start) - at(12, 0)) / (7 * 86400000))
+  const byWeek = [0, 1, 2].map(i => blocks.filter(b => weekIndex(b) === i).reduce((sum, b) => sum + hours(b), 0))
+  assert.equal(byWeek.reduce((a, b) => a + b, 0), 12)
+  assert.ok(byWeek.every(h => h > 0), 'every week gets some: ' + byWeek.join())
+})
+
+test('planning ahead in suggest mode replaces old suggestions in those weeks only', () => {
+  const old = planWeek(emptyWeek, planSettings, at(12, 8), at(12, 8)).blocks.map((b, i) => ({ ...b, id: `o${i}` }))
+  const later = { id: 'keep', module_id: 'm1', state: 'suggested', start: at(30, 9).toISOString(), end: at(30, 10).toISOString() }
+  const result = planWeeks({ ...emptyWeek, blocks: [...old, later] }, planSettings, at(12, 8), at(12, 8), 2)
+  assert.equal(result.remove.length, old.length)
+  assert.ok(!result.remove.includes('keep'))
+})
+
+// full time work and 120 credits: 60, 30 and 30, with weekends free for up to 4 hours a day
+const fullTime = {
+  ...emptyWeek,
+  pattern: [1, 2, 3, 4, 5].map(weekday => ({ weekday, start: '09:00', end: '17:00' })),
+  modules: [
+    { ...module, id: 'A', credits: 60 },
+    { ...module, id: 'B', credits: 30 },
+    { ...module, id: 'C', credits: 30 }
+  ]
+}
+const fullTimeSettings = { ...planSettings, planStyle: 'spread', maxHoursPerDay: 4, studyWindow: { start: '09:00', end: '21:00' } }
+
+test('not enough time is spotted, with the hours needed and free', () => {
+  const check = capacityCheck(fullTime, fullTimeSettings, at(12, 8))
+  assert.equal(check.short, true)
+  assert.equal(Math.round(check.need), 40)
+  assert.equal(check.free, 8)
+
+  const light = capacityCheck({ ...fullTime, modules: [module] }, { ...fullTimeSettings, studyOnWorkDays: true, workDayMaxHours: 1 }, at(12, 8))
+  assert.equal(light.short, false)
+})
+
+test('when time is short every module gets some each week, in proportion to its credits', () => {
+  const { blocks } = planWeek(fullTime, fullTimeSettings, at(12, 8), at(12, 8))
+  const per = id => blocks.filter(b => b.module_id === id).reduce((sum, b) => sum + hours(b), 0)
+  assert.equal(per('A') + per('B') + per('C'), 8)
+  assert.equal(per('A'), 4)
+  assert.equal(per('B'), 2)
+  assert.equal(per('C'), 2)
+})
+
+test('bookable hours drop to nothing once the week is planned', () => {
+  const week = { start: at(12, 0), end: at(19, 0) }
+  assert.equal(bookableHours(fullTime, fullTimeSettings, week, at(12, 8)), 8)
+  const { blocks } = planWeek(fullTime, fullTimeSettings, at(12, 8), at(12, 8))
+  assert.equal(bookableHours({ ...fullTime, blocks }, fullTimeSettings, week, at(12, 8)), 0)
+})
+
+test('submitted assessments get no more time', () => {
+  const data = { ...emptyWeek, assessments: [{ ...tma('t1', 30), type: 'tma', submitted: true }, { id: 'ex', module_id: 'm1', type: 'exam', title: 'Exam', due: at(30, 10).toISOString(), submitted: true }] }
+  assert.equal(getNeeds(data, planSettings, at(12, 8)).length, 0)
+  const { blocks } = planWeek(data, { ...planSettings, revisionMode: 'weekly', revisionHours: 3 }, at(12, 8), at(12, 8))
+  assert.ok(blocks.every(b => !b.assessment_id))
+})
+
+test('catching up adds the extra hours each week until the end date, then stops', () => {
+  const behind = { ...module, catch_up: { hours: 2, from: at(12, 8).toISOString(), until: at(29, 12).toISOString(), label: 'TMA 01' } }
+  assert.equal(catchUpHours(behind, { start: at(12, 0), end: at(19, 0) }), 2)
+  assert.equal(catchUpHours(behind, { start: at(26, 0), end: at(31, 0) }), 2)
+  assert.equal(catchUpHours(behind, { start: zonedTime('2026-11-02', '00:00', 'Europe/London'), end: zonedTime('2026-11-09', '00:00', 'Europe/London') }), 0)
+
+  const { blocks } = planWeek({ ...emptyWeek, modules: [behind] }, planSettings, at(12, 8), at(12, 8))
+  assert.equal(blocks.reduce((sum, b) => sum + hours(b), 0), 12)
 })

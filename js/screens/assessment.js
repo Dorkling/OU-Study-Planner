@@ -1,5 +1,6 @@
 import { db, all, save, remove, removeAssessment, live } from '../db.js'
-import { dateAndTime } from '../time.js'
+import { dateAndTime, shortDate } from '../time.js'
+import { markSubmitted } from '../progress.js'
 import { oneDecimal } from '../estimates.js'
 import { settings } from '../settings.js'
 import { partEstimates, assessmentHours, defaultHours } from '../planner.js'
@@ -19,8 +20,10 @@ export default {
         <div>
           <h1>{{ module?.code }} {{ assessment.title }}</h1>
           <p class="hint">{{ assessment.type === 'exam' ? 'On' : 'Due' }} {{ dueText }}<template v-if="assessment.weight">, worth {{ assessment.weight }}%</template></p>
+          <p v-if="assessment.submitted" class="hint">{{ assessment.type === 'exam' ? 'Done' : 'Submitted' }} on {{ shortDate(assessment.submitted_at, settings.timeZone) }}, no more time is being planned for it.</p>
         </div>
         <div class="actions">
+          <button :class="{ primary: !assessment.submitted }" @click="markSubmitted(assessment, !assessment.submitted)">{{ assessment.submitted ? 'Undo' : assessment.type === 'exam' ? 'Mark exam as done' : 'Mark as submitted' }}</button>
           <button class="link" @click="editing = true">Edit</button>
           <button class="link danger" @click="deleteAssessment">Delete</button>
         </div>
@@ -101,7 +104,7 @@ export default {
     }
 
     return {
-      editing, newTitle, loaded, assessment, module, tasks, estHours, doneHours, percent, dueText, settings, autoEstimate, defaultHours,
+      editing, newTitle, loaded, assessment, module, tasks, estHours, doneHours, percent, dueText, settings, autoEstimate, defaultHours, markSubmitted, shortDate,
       saveAssessment, deleteAssessment, addPart, toggleDone, save, remove
     }
   }

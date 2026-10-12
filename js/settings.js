@@ -8,6 +8,8 @@ export const defaults = {
   setupDone: false,
   plannerMode: 'suggest',
   planStyle: 'spread',
+  planAhead: 'week',
+  days: null,
   minBlock: 30,
   maxBlock: 60,
   breakMins: 15,

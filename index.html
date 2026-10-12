@@ -17,6 +17,18 @@
       const theme = localStorage.getItem('theme')
       if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme
     } catch {}
+
+    // an update can leave a mix of old and new files for one load, reload once to get the new set
+    window.addEventListener('error', event => {
+      if (!/does not provide an export|is not defined/.test(event.message)) return
+      try {
+        if (sessionStorage.getItem('reloaded')) return
+        sessionStorage.setItem('reloaded', '1')
+      } catch {
+        return
+      }
+      location.reload()
+    })
   </script>
 </head>
 <body>

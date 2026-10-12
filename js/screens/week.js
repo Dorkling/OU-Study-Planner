@@ -1,7 +1,9 @@
-import { save, remove, live, loadAll } from '../db.js'
-import { settings } from '../settings.js'
-import { getShifts, getBlocked, getFreeTime } from '../freetime.js'
-import { getNeeds, getModuleNeeds, planWeek, checkRisks } from '../planner.js'
+import { save, saveMany, remove, live, loadAll } from '../db.js'
+import { settings, saveSetting } from '../settings.js'
+import { getShifts, getBlocked, getFreeTime, getBusy, dayPlan } from '../freetime.js'
+import { getNeeds, moduleWeekSummary, planWeeks, weeksToEnd, checkRisks, findClashes } from '../planner.js'
+import CapacityNote from '../components/capacity-note.js'
+import { moveClashes, markSubmitted } from '../progress.js'
 import { dateKey, clockTime, shortDate, weekBounds, toWall, fromWall } from '../time.js'
 import { oneDecimal } from '../estimates.js'
 import { calendarEvents, buildCalendar } from '../ics.js'
@@ -10,26 +12,45 @@ import { downloadFile } from '../backup.js'
 const { ref, computed, watch, onMounted, onUnmounted } = Vue
 
 // uk dates and monday start
-const enGb = { code: 'en-gb', week: { dow: 1, doy: 4 }, buttonText: { today: 'Today', week: 'Week', day: 'Day' } }
+const enGb = { code: 'en-gb', week: { dow: 1, doy: 4 }, buttonText: { today: 'Today', month: 'Month', week: 'Week', day: 'Day' } }
 const clock = { hour: '2-digit', minute: '2-digit', hour12: false }
+
+// earliest study start across the week
+const earliestStudy = () => [0, 1, 2, 3, 4, 5, 6].map(d => dayPlan(settings, d)).filter(d => d.study).map(d => d.start).sort()[0] || '09:00'
 
 // start the grid early enough for every shift
 function gridStart(pattern, exceptions) {
   const shifts = [...pattern, ...exceptions.filter(e => e.type === 'shift')]
-  const times = [settings.studyWindow.start, '07:00', ...shifts.map(s => s.end <= s.start ? '00:00' : s.start)]
+  const times = [earliestStudy(), '07:00', ...shifts.map(s => s.end <= s.start ? '00:00' : s.start)]
   return times.sort()[0].slice(0, 2) + ':00'
 }
 
 export default {
+  components: { CapacityNote },
   template: `
     <section>
       <div class="page-head">
-        <h1>Week</h1>
+        <h1>{{ viewType === 'dayGridMonth' ? 'Month' : 'Week' }}</h1>
         <div class="actions">
           <button @click="exportCalendar">Add to calendar</button>
           <button v-if="suggestedCount" @click="acceptAll">Accept all</button>
-          <button v-if="canPlan" class="primary" @click="plan">Plan my week</button>
+          <div v-if="canPlan" class="plan-range">
+            <select v-model="settings.planAhead" @change="saveSetting('planAhead', settings.planAhead)" aria-label="How far ahead to plan">
+              <option value="week">This week</option>
+              <option value="4">Next 4 weeks</option>
+              <option value="9">Next 2 months</option>
+              <option value="end">Until my modules end</option>
+            </select>
+            <button class="primary" :disabled="planning" @click="plan">{{ planning ? 'Planning...' : 'Plan' }}</button>
+          </div>
         </div>
+      </div>
+
+      <CapacityNote />
+
+      <div v-if="clashes.length" class="notice warn">
+        <p>{{ clashes.length }} study {{ clashes.length === 1 ? 'block clashes' : 'blocks clash' }} with your work, blocked time or study hours. They're marked in red.</p>
+        <div class="actions"><button @click="moveAll">Move {{ clashes.length === 1 ? 'it' : 'them' }}</button></div>
       </div>
 
       <div v-if="message || atRisk.length" class="notice" :class="{ warn: atRisk.length }">
@@ -40,6 +61,7 @@ export default {
       <div v-if="selected" class="card panel">
         <p><strong>{{ label(selected.module_id, selected.assessment_id) }}</strong><template v-if="partTitle(selected.task_id)">, {{ partTitle(selected.task_id) }}</template></p>
         <p class="hint">{{ whenText(selected.start, selected.end) }}<template v-if="selected.state === 'suggested'">, suggested</template></p>
+        <p v-if="clashOf(selected)" class="hint error">{{ clashOf(selected) === 'busy' ? 'This clashes with work, blocked time or a tutorial.' : 'This is outside your study hours. Drag it to keep it somewhere else.' }}</p>
         <div class="actions">
           <button v-if="selected.state === 'suggested'" class="primary" @click="accept(selected)">Accept</button>
           <button @click="dismiss(selected)">{{ selected.state === 'suggested' ? 'Dismiss' : 'Remove' }}</button>
@@ -68,8 +90,9 @@ export default {
         <span><i class="swatch ev-suggested"></i>Suggested</span>
         <span><i class="swatch ev-free"></i>Free</span>
         <span><i class="swatch ev-due"></i>Deadline</span>
+        <span v-if="clashes.length"><i class="swatch ev-clash-key"></i>Clash</span>
       </div>
-      <p class="hint">Drag over free time to add a block. Click a block to accept or remove it, drag to move it.</p>
+      <p class="hint">Drag over free time to add a block. Click a block to accept or remove it, drag to move it. In Month, click a date to open that week.</p>
       <div ref="el" class="calendar card"></div>
 
       <div v-if="moduleWeek.length" class="card">
@@ -78,7 +101,8 @@ export default {
           <li v-for="m in moduleWeek" :key="m.module_id">
             <div class="grow">
               <strong>{{ code(m.module_id) }}</strong>
-              <p class="hint">{{ oneDecimal(m.covered) }} of about {{ oneDecimal(m.weekly) }} h booked, counting TMA work and tutorials</p>
+              <p class="hint">{{ oneDecimal(m.covered) }} of about {{ oneDecimal(m.weekly) }} h booked or suggested<template v-if="m.catchUp"> (with {{ m.catchUp }} h catch up)</template>, counting TMA work and tutorials</p>
+              <p v-if="m.short" class="hint error">{{ oneDecimal(m.short) }} h short, with no free time left this week</p>
             </div>
           </li>
         </ul>
@@ -86,7 +110,7 @@ export default {
 
       <div class="card">
         <h2>Still to do</h2>
-        <p v-if="!needs.length" class="hint">Nothing due. Add assessments in Modules.</p>
+        <p v-if="!needs.length" class="hint">Nothing left to plan for. Add assessments in Modules, and tick them off there once they're submitted.</p>
         <ul class="list">
           <li v-for="n in needs" :key="n.assessment.id">
             <div class="grow">
@@ -97,7 +121,10 @@ export default {
                 aim to finish by {{ dayText(n.target) }}<template v-if="n.assessment.provisional"> (rough date)</template>
               </p>
             </div>
-            <a :href="'#/assessment/' + n.assessment.id">Parts</a>
+            <div class="actions">
+              <button class="link" @click="markSubmitted(n.assessment, true)">{{ n.assessment.type === 'exam' ? 'Done' : 'Submitted' }}</button>
+              <a :href="'#/assessment/' + n.assessment.id">Parts</a>
+            </div>
           </li>
         </ul>
       </div>
@@ -109,6 +136,7 @@ export default {
     const picked = ref(null)
     const pickedFor = ref('')
     const viewStart = ref(new Date())
+    const viewType = ref('')
     let calendar, resizer
 
     const zone = () => settings.timeZone
@@ -139,10 +167,31 @@ export default {
     const canPlan = computed(() => modules.value.some(m => modeOf(m.id) !== 'manual'))
     const suggestedCount = computed(() => data.value ? data.value.blocks.filter(b => b.state === 'suggested').length : 0)
 
+    // month view plans and totals this week, week and day views use the one on screen
+    const weekOf = () => viewType.value === 'dayGridMonth' ? new Date() : viewStart.value
+
     const moduleWeek = computed(() => {
       if (!data.value || !settings.trackOptional) return []
-      return getModuleNeeds(data.value, settings, weekBounds(viewStart.value, zone()), data.value.blocks)
+      return moduleWeekSummary(data.value, settings, weekBounds(weekOf(), zone()), new Date())
     })
+
+    // suggestions tidy themselves, so only accepted blocks are left to warn about
+    const allClashes = computed(() => data.value ? findClashes(data.value, settings, new Date()) : [])
+    const clashes = computed(() => allClashes.value.filter(c => c.block.state === 'accepted'))
+    const clashOf = block => allClashes.value.find(c => c.block.id === block.id)?.reason
+
+    async function moveAll() {
+      await moveClashes(clashes.value.map(c => c.block))
+      selected.value = null
+      message.value = 'Clashing blocks taken out and the week planned again.'
+    }
+
+    // no dropping or drawing blocks over work, blocked time or tutorials
+    function overlapsBusy(start, end) {
+      const day = 86400000
+      const busy = getBusy(new Date(start - day), new Date(+end + day), { ...data.value, blocks: [] }, settings)
+      return busy.some(b => b.start < end && b.end > start)
+    }
 
     // calendar uses device time, convert with toWall
     function events(range, success) {
@@ -152,7 +201,9 @@ export default {
       const to = fromWall(range.end, zone())
       const wall = item => ({ ...item, start: toWall(item.start, zone()), end: toWall(item.end, zone()) })
 
-      const free = getFreeTime(from, to, d, settings)
+      // month shows what's on, not free time
+      const month = calendar?.view.type === 'dayGridMonth'
+      const free = month ? [] : getFreeTime(from, to, d, settings)
         .map(f => wall({ start: f.start, end: f.end, display: 'background', classNames: ['ev-free'] }))
 
       const work = getShifts(from, to, d.pattern, d.exceptions, zone())
@@ -173,34 +224,43 @@ export default {
           start: b.start,
           end: b.end,
           editable: true,
-          classNames: [{ suggested: 'ev-suggested', done: 'ev-done' }[b.state] || 'ev-study'],
+          classNames: [{ suggested: 'ev-suggested', done: 'ev-done' }[b.state] || 'ev-study', ...(clashOf(b) ? ['ev-clash'] : [])],
           extendedProps: { block: b }
         }))
 
       // deadlines sit in the all day row
+      // submitted ones stay on the calendar but faded
       const due = d.assessments.map(a => ({
-        title: `${a.provisional ? '~' : ''}${label(a.module_id, a.id)} ${clockTime(new Date(a.due), zone())}`,
+        title: `${a.provisional ? '~' : ''}${label(a.module_id, a.id)} ${a.submitted ? (a.type === 'exam' ? 'done' : 'submitted') : clockTime(new Date(a.due), zone())}`,
         start: dateKey(new Date(a.due), zone()),
         allDay: true,
-        classNames: ['ev-due']
+        classNames: a.submitted ? ['ev-due', 'ev-submitted'] : ['ev-due']
       }))
 
       success([...free, ...work, ...busy, ...tutorials, ...blocks, ...due])
     }
 
-    // plan the week on screen
+    // plan from the week on screen, as far ahead as chosen
+    const planning = ref(false)
     async function plan() {
+      planning.value = true
       const d = data.value
-      const result = planWeek(d, settings, new Date(), viewStart.value)
+      const ahead = settings.planAhead
+      const weeks = ahead === 'week' ? 1 : ahead === 'end' ? weeksToEnd(d, settings, weekOf()) : Number(ahead)
 
+      // let the button show planning before the work starts
+      await new Promise(resolve => setTimeout(resolve, 20))
+      const result = planWeeks(d, settings, new Date(), weekOf(), weeks)
       await remove('blocks', result.remove)
-      for (const b of result.blocks) await save('blocks', b)
+      await saveMany('blocks', result.blocks)
 
       const count = result.blocks.length
+      const span = weeks === 1 ? 'this week' : `over ${weeks} weeks`
       selected.value = null
+      planning.value = false
       if (!result.hadWork) message.value = `Nothing to plan, it's all covered.`
-      else if (!count) message.value = 'No free time left this week for the work still to do.'
-      else message.value = `Planned ${count} study ${count === 1 ? 'block' : 'blocks'} this week.`
+      else if (!count) message.value = `No free time left ${span} for the work still to do.`
+      else message.value = `Planned ${count} study ${count === 1 ? 'block' : 'blocks'} ${span}.`
     }
 
     // export the next few weeks as .ics
@@ -223,9 +283,7 @@ export default {
     }
 
     async function acceptAll() {
-      for (const b of data.value.blocks.filter(b => b.state === 'suggested')) {
-        await save('blocks', { ...b, state: 'accepted' })
-      }
+      await saveMany('blocks', data.value.blocks.filter(b => b.state === 'suggested').map(b => ({ ...b, state: 'accepted' })))
       message.value = ''
     }
 
@@ -250,7 +308,8 @@ export default {
         task_id: null,
         start: picked.value.start.toISOString(),
         end: picked.value.end.toISOString(),
-        state: 'accepted'
+        state: 'accepted',
+        byUser: true
       })
       clearPick()
     }
@@ -260,15 +319,18 @@ export default {
       const block = info.event.extendedProps.block
       const start = fromWall(info.event.start, zone())
       const end = fromWall(info.event.end, zone())
-      save('blocks', { ...block, start: start.toISOString(), end: end.toISOString(), state: block.state === 'done' ? 'done' : 'accepted', auto: false })
+      save('blocks', { ...block, start: start.toISOString(), end: end.toISOString(), state: block.state === 'done' ? 'done' : 'accepted', auto: false, byUser: true })
     }
 
     onMounted(() => {
       calendar = new FullCalendar.Calendar(el.value, {
         locale: enGb,
         initialView: window.innerWidth < 700 ? 'timeGridDay' : 'timeGridWeek',
-        headerToolbar: { left: 'prev,next today', center: 'title', right: 'timeGridWeek,timeGridDay' },
+        headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' },
         dayHeaderFormat: { weekday: 'short', day: 'numeric' },
+        views: { dayGridMonth: { dayHeaderFormat: { weekday: 'short' }, dayMaxEvents: 4 } },
+        navLinks: true,
+        navLinkDayClick: date => calendar.changeView('timeGridWeek', date),
         slotLabelFormat: clock,
         eventTimeFormat: clock,
         slotMinTime: '07:00',
@@ -276,7 +338,7 @@ export default {
         snapDuration: '00:15:00',
         allDayText: 'Due',
         height: '75vh',
-        scrollTime: settings.studyWindow.start,
+        scrollTime: earliestStudy(),
         nowIndicator: true,
         now: () => toWall(new Date(), zone()),
         selectable: true,
@@ -285,6 +347,13 @@ export default {
         events,
         datesSet(info) {
           viewStart.value = fromWall(info.start, zone())
+          viewType.value = info.view.type
+        },
+        selectAllow(info) {
+          return !info.allDay && !overlapsBusy(fromWall(info.start, zone()), fromWall(info.end, zone()))
+        },
+        eventAllow(info) {
+          return !info.allDay && !overlapsBusy(fromWall(info.start, zone()), fromWall(info.end, zone()))
         },
         eventClick(info) {
           if (!info.event.extendedProps.block) return
@@ -318,7 +387,7 @@ export default {
     })
 
     return {
-      el, message, atRisk, selected, picked, pickedFor, needs, modules, moduleWeek, canPlan, suggestedCount,
+      el, message, viewType, markSubmitted, planning, settings, saveSetting, atRisk, clashes, clashOf, moveAll, selected, picked, pickedFor, needs, modules, moduleWeek, canPlan, suggestedCount,
       code, label, partTitle, dayText, whenText, oneDecimal, plan, exportCalendar, accept, acceptAll, dismiss, clearPick, addBlock
     }
   }
