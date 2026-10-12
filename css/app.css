@@ -345,3 +345,7 @@ details[open] summary { margin-bottom: .75rem; }
 /* drive connect choice */
 .choice { margin: .75rem 0; }
 .choice .hint { margin: .3rem 0 0; }
+
+/* new version ready */
+.banner.update { background: var(--accent-soft); color: var(--text); }
+.banner.update .link { color: var(--accent); }

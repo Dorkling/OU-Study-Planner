@@ -9,6 +9,8 @@ import Settings from './screens/settings.js'
 import { syncState, startSync, reconnectDrive } from './sync.js'
 import { startReminders } from './notify.js'
 import { startAutoPlan } from './autoplan.js'
+import { update, startUpdates, applyUpdate } from './updates.js'
+import { downloadBackup } from './backup.js'
 
 const { createApp, ref, computed } = Vue
 
@@ -34,6 +36,12 @@ const App = {
         <a v-for="link in links" :href="'#/' + link.path" :class="{ active: section === link.path }">{{ link.name }}</a>
       </nav>
     </header>
+    <div v-if="update.ready && !update.later" class="banner update">
+      <span>A new version of the planner is ready. Your plans and settings stay as they are.</span>
+      <button class="link" @click="applyUpdate">Update now</button>
+      <button class="link" @click="downloadBackup">Download a backup first</button>
+      <button class="link" @click="update.later = true">Later</button>
+    </div>
     <div v-if="syncState.status === 'signed-out' && !inSetup" class="banner">
       <span>Google Drive sync is paused.</span>
       <button class="link" @click="reconnect">Reconnect</button>
@@ -64,7 +72,7 @@ const App = {
       }
     }
 
-    return { links, hash, current, props, section, inSetup, syncState, reconnect, reconnectError }
+    return { links, hash, current, props, section, inSetup, syncState, reconnect, reconnectError, update, applyUpdate, downloadBackup }
   }
 }
 
@@ -81,4 +89,5 @@ startAutoPlan()
 // stop the browser clearing data when space is low
 navigator.storage?.persist?.()
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js')
+// new versions wait for a yes, see updates.js
+startUpdates()
