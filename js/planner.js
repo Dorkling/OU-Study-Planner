@@ -367,28 +367,45 @@ export function weeksToEnd(data, settings, fromDate) {
 }
 
 // plan several weeks in a row, each one counting what the weeks before it booked
-export function planWeeks(data, settings, now, fromDate, weeks) {
+// the whole range is cleared first, so plan and the background replan always agree
+export function planWeeks(data, settings, now, fromDate, weeks, modes = ['auto', 'suggest']) {
   const zone = settings.timeZone
   const monday = dateKey(weekBounds(fromDate, zone).start, zone)
-  let blocks = data.blocks
+  const rangeStart = startOfDay(monday, zone)
+  const rangeEnd = startOfDay(addDaysToKey(monday, weeks * 7), zone)
+  const modeOf = id => data.modules.find(m => m.id === id)?.mode_override || settings.plannerMode
+  const planning = data.modules.filter(m => modes.includes(modeOf(m.id))).map(m => m.id)
+
+  // this range's suggestions and future auto blocks get planned again from scratch
+  const inRange = b => new Date(b.start) >= rangeStart && new Date(b.start) < rangeEnd
+  const cleared = data.blocks.filter(b => planning.includes(b.module_id) && inRange(b) && (
+    b.state === 'suggested' || (b.state === 'accepted' && b.auto && new Date(b.start) > now)
+  ))
+  let blocks = data.blocks.filter(b => !cleared.includes(b))
   const added = []
-  const remove = new Set()
   let atRisk = []
   let hadWork = false
 
   for (let i = 0; i < weeks; i++) {
     const weekOf = startOfDay(addDaysToKey(monday, i * 7), zone)
-    const result = planWeek({ ...data, blocks }, settings, now, weekOf)
+    const result = planWeek({ ...data, blocks }, settings, now, weekOf, modes)
     if (i === 0) atRisk = result.atRisk
     hadWork ||= result.hadWork
 
     // carry this week's plan into the next one
-    result.remove.forEach(id => remove.add(id))
     blocks = [...blocks.filter(b => !result.remove.includes(b.id)), ...result.blocks]
     added.push(...result.blocks)
   }
 
-  return { blocks: added, remove: [...remove], atRisk, hadWork, unchanged: !added.length && !remove.size }
+  // a block planned again in the same place keeps its id
+  const keep = new Set(added.map(b => b.id))
+  return {
+    blocks: added,
+    remove: cleared.map(b => b.id).filter(id => !keep.has(id)),
+    atRisk,
+    hadWork,
+    unchanged: signature(added) === signature(cleared)
+  }
 }
 
 // hours that could still be booked in a week, keeping to each day's limit
@@ -437,4 +454,17 @@ export function moduleWeekSummary(data, settings, week, now) {
     const gap = m.weekly - m.covered
     return { ...m, short: full && gap > 0.5 ? quarters(gap) : 0 }
   })
+}
+
+// redo every future auto block in one run, the same way plan does, so an unchanged plan comes out identical
+export function replanAuto(data, settings, now) {
+  const zone = settings.timeZone
+  const isAuto = id => (data.modules.find(m => m.id === id)?.mode_override || settings.plannerMode) === 'auto'
+  const future = data.blocks.filter(b => b.auto && b.state === 'accepted' && new Date(b.start) > now && isAuto(b.module_id))
+
+  // from this week to the last week that has auto blocks
+  const first = weekBounds(now, zone).start
+  const last = Math.max(+first, ...future.map(b => +weekBounds(new Date(b.start), zone).start))
+  const weeks = Math.round((last - first) / (7 * 86400000)) + 1
+  return planWeeks(data, settings, now, now, weeks, ['auto'])
 }

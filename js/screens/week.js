@@ -336,6 +336,8 @@ export default {
         slotMinTime: '07:00',
         slotMaxTime: '24:00',
         snapDuration: '00:15:00',
+        eventShortHeight: 50,
+        eventMinHeight: 18,
         allDayText: 'Due',
         height: '75vh',
         scrollTime: earliestStudy(),

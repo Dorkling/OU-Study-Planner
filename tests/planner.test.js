@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours } from '../js/planner.js'
+import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto } from '../js/planner.js'
 
 import { zonedTime } from '../js/time.js'
 
@@ -419,4 +419,31 @@ test('catching up adds the extra hours each week until the end date, then stops'
 
   const { blocks } = planWeek({ ...emptyWeek, modules: [behind] }, planSettings, at(12, 8), at(12, 8))
   assert.equal(blocks.reduce((sum, b) => sum + hours(b), 0), 12)
+})
+
+test('a plan made to the end in auto mode stays put when nothing changes', () => {
+  const data = {
+    ...emptyWeek,
+    modules: [{ ...module, mode_override: 'auto' }],
+    assessments: [
+      { id: 'a1', module_id: 'm1', type: 'tma', title: 'TMA 01', due: at(29, 12).toISOString() },
+      { id: 'a2', module_id: 'm1', type: 'tma', title: 'TMA 02', due: zonedTime('2026-12-10', '12:00', 'Europe/London').toISOString() }
+    ]
+  }
+  const settingsSpread = { ...planSettings, planStyle: 'spread' }
+  const planned = planWeeks(data, settingsSpread, at(12, 8), at(12, 8), 10).blocks
+  const again = replanAuto({ ...data, blocks: planned }, settingsSpread, at(12, 8))
+  assert.equal(again.unchanged, true)
+  assert.equal(again.remove.length, 0)
+})
+
+test('auto replanning reacts to a change and then settles', () => {
+  const data = { ...emptyWeek, modules: [{ ...module, mode_override: 'auto' }] }
+  const planned = planWeeks(data, planSettings, at(12, 8), at(12, 8), 4).blocks
+  const changed = { ...data, blocks: planned, exceptions: [{ date: '2026-10-13', type: 'shift', start: '09:00', end: '21:00' }] }
+  const first = replanAuto(changed, planSettings, at(12, 8))
+  assert.equal(first.unchanged, false)
+
+  const after = [...planned.filter(b => !first.remove.includes(b.id)), ...first.blocks.filter(b => !planned.some(p => p.id === b.id))]
+  assert.equal(replanAuto({ ...changed, blocks: after }, planSettings, at(12, 8)).unchanged, true)
 })

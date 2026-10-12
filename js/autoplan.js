@@ -1,6 +1,6 @@
 import { saveMany, remove, loadAll } from './db.js'
 import { settings } from './settings.js'
-import { planWeek, findClashes } from './planner.js'
+import { planWeek, replanAuto, findClashes } from './planner.js'
 import { weekBounds } from './time.js'
 
 let running = false
@@ -29,19 +29,24 @@ export async function autoPlan() {
     const now = new Date()
     let data = await loadAll()
 
-    // suggestions that clash are out of date, clear them and suggest again for their week
-    const stale = findClashes(data, settings, now).filter(c => c.block.state === 'suggested').map(c => c.block)
+    // suggestions that clash or no longer fit the block length settings are out of date
+    const minutes = b => (new Date(b.end) - new Date(b.start)) / 60000
+    const wrongLength = data.blocks.filter(b => b.state === 'suggested' && new Date(b.start) > now && (minutes(b) < settings.minBlock || minutes(b) > settings.maxBlock))
+    const clashing = findClashes(data, settings, now).filter(c => c.block.state === 'suggested').map(c => c.block)
+    const stale = [...new Set([...clashing, ...wrongLength])]
     if (stale.length) {
       await remove('blocks', stale.map(b => b.id))
       for (const week of weeksOf(stale)) await replan(week, ['suggest'])
       data = await loadAll()
     }
 
-    // keep auto modules planned for this week and any later week that already has auto blocks
+    // keep auto modules planned from this week to the last week that has auto blocks, in one run
     const isAuto = id => (data.modules.find(m => m.id === id)?.mode_override || settings.plannerMode) === 'auto'
     if (!data.modules.some(m => isAuto(m.id))) return
-    const autoBlocks = data.blocks.filter(b => b.auto && b.state === 'accepted' && new Date(b.start) > now && isAuto(b.module_id))
-    for (const week of weeksOf([{ start: now }, ...autoBlocks])) await replan(week, ['auto'])
+    const result = replanAuto(data, settings, now)
+    if (result.unchanged) return
+    await remove('blocks', result.remove)
+    await saveMany('blocks', result.blocks)
   } finally {
     running = false
   }

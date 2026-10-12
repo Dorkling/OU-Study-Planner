@@ -334,3 +334,10 @@ details[open] summary { margin-bottom: .75rem; }
 .panel-inline .row label { display: flex; flex-direction: column; gap: .25rem; font-size: .9rem; }
 .panel-inline input[type="number"] { width: 6rem; }
 .catch-up { color: var(--accent); }
+
+/* keep block text readable when a block is short */
+.fc-timegrid-event .fc-event-main { font-size: .8rem; line-height: 1.25; overflow: hidden; }
+.fc-timegrid-event .fc-event-time { font-size: .75rem; }
+.fc-timegrid-event-short .fc-event-main-frame { flex-direction: row; gap: .3rem; align-items: baseline; }
+.fc-timegrid-event-short .fc-event-time::after { content: ''; }
+.fc-timegrid-event-short .fc-event-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
