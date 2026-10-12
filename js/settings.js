@@ -9,6 +9,7 @@ export const defaults = {
   plannerMode: 'suggest',
   planStyle: 'spread',
   planAhead: 'week',
+  groupByDay: true,
   days: null,
   minBlock: 30,
   maxBlock: 60,

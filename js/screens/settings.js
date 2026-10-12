@@ -82,6 +82,8 @@ export default {
             </select>
           </label>
         </div>
+        <label class="check"><input type="checkbox" v-model="settings.groupByDay" @change="put('groupByDay')"> Keep each module to its own days where possible</label>
+        <p class="hint">The module that needs the most time gets the biggest free day, and so on. If time is short, modules still share so none miss out.</p>
         <label class="check"><input type="checkbox" v-model="settings.trackOptional" @change="put('trackOptional')"> Plan weekly module study from credits</label>
         <p class="hint">Adds general study (reading, activities) to reach each module's weekly hours. TMA work and tutorials count toward it.</p>
       </div>

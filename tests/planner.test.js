@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto } from '../js/planner.js'
+import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto, assignDays } from '../js/planner.js'
 
 import { zonedTime } from '../js/time.js'
 
@@ -446,4 +446,50 @@ test('auto replanning reacts to a change and then settles', () => {
 
   const after = [...planned.filter(b => !first.remove.includes(b.id)), ...first.blocks.filter(b => !planned.some(p => p.id === b.id))]
   assert.equal(replanAuto({ ...changed, blocks: after }, planSettings, at(12, 8)).unchanged, true)
+})
+
+// study on monday, wednesday, friday and maybe saturday, 4 hours each, no work
+const studyDay = { study: true, start: '09:00', end: '21:00', maxHours: 4, preferred: false }
+const noStudy = { study: false, start: '09:00', end: '21:00', maxHours: 4, preferred: false }
+const threeDays = { 0: noStudy, 1: studyDay, 2: noStudy, 3: studyDay, 4: noStudy, 5: studyDay, 6: noStudy }
+const fourDays = { ...threeDays, 6: studyDay }
+const modulesOn = (...credits) => credits.map((c, i) => ({ ...module, id: `M${i}`, credits: c }))
+const byDay = blocks => {
+  const days = {}
+  for (const b of blocks) (days[dayLabel(b)] ??= new Set()).add(b.module_id)
+  return Object.fromEntries(Object.entries(days).map(([d, s]) => [d, [...s].sort()]))
+}
+
+test('three modules and three days get a day each', () => {
+  const data = { ...emptyWeek, modules: modulesOn(30, 30, 30) }
+  const { blocks } = planWeek(data, { ...planSettings, days: threeDays }, at(12, 8), at(12, 8))
+  const days = byDay(blocks)
+  assert.deepEqual(Object.values(days).map(m => m.length), [1, 1, 1], 'one module per day')
+  assert.equal(new Set(Object.values(days).flat()).size, 3, 'every module gets a day')
+})
+
+test('a spare day goes to the module that needs the most time', () => {
+  const data = { ...emptyWeek, modules: modulesOn(60, 30, 30) }
+  const owners = assignDays(
+    [1, 3, 5, 6].map(d => ({ start: at(11 + d, 9), end: at(11 + d, 21) })),
+    data.modules.map(m => ({ module_id: m.id, weekly: m.credits / 3 })),
+    { ...planSettings, days: fourDays }
+  )
+  const count = id => Object.values(owners.owners).filter(o => o === id).length
+  assert.deepEqual([count('M0'), count('M1'), count('M2')], [2, 1, 1])
+})
+
+test('tma work goes on its own module days too', () => {
+  const data = { ...emptyWeek, modules: modulesOn(30, 30, 30), assessments: [{ id: 't', module_id: 'M1', type: 'tma', title: 'TMA', due: at(30, 12).toISOString() }] }
+  const { blocks } = planWeek(data, { ...planSettings, days: threeDays, hoursPerTma: 4 }, at(12, 8), at(12, 8))
+  const days = byDay(blocks)
+  const tmaDays = new Set(blocks.filter(b => b.assessment_id === 't').map(dayLabel))
+  assert.ok(tmaDays.size > 0)
+  for (const d of tmaDays) assert.deepEqual(days[d], ['M1'])
+})
+
+test('turning it off lets modules share days', () => {
+  const data = { ...emptyWeek, modules: modulesOn(30, 30, 30) }
+  const { blocks } = planWeek(data, { ...planSettings, days: threeDays, groupByDay: false }, at(12, 8), at(12, 8))
+  assert.equal(blocks.reduce((sum, b) => sum + hours(b), 0), 12)
 })

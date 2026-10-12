@@ -120,10 +120,21 @@ export function getModuleNeeds(data, settings, week, booked) {
 }
 
 // fill slots earliest target first, keeping to the daily limit
-export function planBlocks(free, needs, existing, settings) {
+export function planBlocks(free, needs, existing, settings, days = { owners: {}, shares: {} }) {
   const zone = settings.timeZone
   const slots = cutSlots(free, settings).sort((a, b) => a.start - b.start)
   const dayOf = slot => slot.key || dateKey(slot.start, zone)
+
+  // 0 for the module's own day while it's under its fair share, 1 for a day nobody has, 2 for another module's day
+  const moduleOf = need => need.module_id ?? need.assessment.module_id
+  const booked = {}
+  const tierOf = (slot, need) => {
+    const owner = days.owners[dayOf(slot)]
+    const module = moduleOf(need)
+    if (!owner) return 1
+    if (owner !== module) return 2
+    return (booked[module] || 0) < (days.shares[module] ?? Infinity) ? 0 : 1
+  }
 
   // hours already booked each day
   const used = {}
@@ -163,6 +174,7 @@ export function planBlocks(free, needs, existing, settings) {
     blocks.push({ ...block, id: blockId(block) })
 
     used[dayOf(slot)] = (used[dayOf(slot)] || 0) + hours
+    booked[moduleOf(need)] = (booked[moduleOf(need)] || 0) + hours
 
     // keep the rest of the slot after a break
     slot.start = new Date(+end + settings.breakMins * 60000)
@@ -209,12 +221,13 @@ export function planBlocks(free, needs, existing, settings) {
         st.turn++
         const byDistance = (a, b) => Math.abs(a.start - aim) - Math.abs(b.start - aim)
 
-        // prefer a full block on a preferred day in the same week, then any full block, then anything
+        // within the same week: the module's own day first, then a slot that takes a full block, then a preferred day, then the nearest
         const full = Math.min(st.left, settings.maxBlock / 60)
         const usable = slots.filter(slot => hoursIn(slot, st.need, st.left))
-        const fits = usable.filter(slot => hoursIn(slot, st.need, st.left) >= full)
-        const preferred = fits.filter(slot => slot.preferred && Math.abs(slot.start - aim) <= 3.5 * 86400000)
-        const nearest = preferred.sort(byDistance)[0] || fits.sort(byDistance)[0] || usable.sort(byDistance)[0]
+        const isFull = slot => hoursIn(slot, st.need, st.left) >= full ? 1 : 0
+        const sameWeek = usable.filter(slot => Math.abs(slot.start - aim) <= 3.5 * 86400000)
+        const ranked = sameWeek.sort((a, b) => tierOf(a, st.need) - tierOf(b, st.need) || isFull(b) - isFull(a) || b.preferred - a.preferred || byDistance(a, b))
+        const nearest = ranked[0] || usable.filter(isFull).sort(byDistance)[0] || usable.sort(byDistance)[0]
         if (!nearest) {
           st.stuck = true
           continue
@@ -224,13 +237,15 @@ export function planBlocks(free, needs, existing, settings) {
       states.forEach(st => { st.stuck = false })
     }
 
-    // put anything left in the earliest slots, preferred days first, still taking turns
-    for (const preferredOnly of [true, false]) {
-      for (const slot of slots) {
-        if (preferredOnly && !slot.preferred) continue
-        let st
-        while (!slot.taken && (st = next(st => hoursIn(slot, st.need, st.left) > 0))) {
-          st.left -= place(slot, st.need, hoursIn(slot, st.need, st.left), st.parts)
+    // put anything left in the earliest slots, own days first, then preferred days, still taking turns
+    for (const tier of [0, 1, 2]) {
+      for (const preferredOnly of [true, false]) {
+        for (const slot of slots) {
+          if (preferredOnly && !slot.preferred) continue
+          let st
+          while (!slot.taken && (st = next(st => tierOf(slot, st.need) <= tier && hoursIn(slot, st.need, st.left) > 0))) {
+            st.left -= place(slot, st.need, hoursIn(slot, st.need, st.left), st.parts)
+          }
         }
       }
     }
@@ -265,6 +280,41 @@ const signature = blocks => blocks
   .sort()
   .join('|')
 
+// one module per day where possible: each module gets a day first, the neediest the biggest,
+// then any spare days go to whichever still needs the most time
+// when time is short each module's claim on its own days stops at its fair share of the week
+export function assignDays(free, moduleNeeds, settings) {
+  const zone = settings.timeZone
+  const modules = moduleNeeds.filter(m => m.weekly > 0)
+  if (modules.length < 2) return { owners: {}, shares: {} }
+
+  // hours each day could take, keeping to its limit
+  const days = {}
+  for (const f of free) {
+    const key = f.key || dateKey(f.start, zone)
+    const limit = f.workDay ? settings.workDayMaxHours : dayPlan(settings, weekdayOf(key)).maxHours
+    days[key] ??= { key, hours: 0, limit }
+    days[key].hours += hoursBetween(f.start, f.end)
+  }
+  const biggest = Object.values(days)
+    .map(d => ({ key: d.key, hours: Math.min(d.hours, d.limit) }))
+    .filter(d => d.hours * 60 >= settings.minBlock)
+    .sort((a, b) => b.hours - a.hours || a.key.localeCompare(b.key))
+
+  const owners = {}
+  const left = modules.map(m => ({ id: m.module_id, hours: m.weekly })).sort((a, b) => b.hours - a.hours)
+  biggest.forEach((day, i) => {
+    const module = i < left.length ? left[i] : [...left].sort((a, b) => b.hours - a.hours)[0]
+    owners[day.key] = module.id
+    module.hours -= day.hours
+  })
+
+  const capacity = biggest.reduce((sum, d) => sum + d.hours, 0)
+  const need = modules.reduce((sum, m) => sum + m.weekly, 0)
+  const shares = Object.fromEntries(modules.map(m => [m.module_id, need > capacity ? capacity * m.weekly / need : m.weekly]))
+  return { owners, shares }
+}
+
 // plan a week: assessments, then revision, then module study
 // modes is which planner modes to include
 export function planWeek(data, settings, now, weekOf, modes = ['auto', 'suggest']) {
@@ -293,14 +343,15 @@ export function planWeek(data, settings, now, weekOf, modes = ['auto', 'suggest'
   const needs = getNeeds({ ...data, assessments, blocks: [...kept, ...elsewhere] }, settings, now)
   const until = new Date(Math.max(week.end, ...needs.map(n => +n.target)))
   const free = getFreeTime(from, until, { ...data, blocks: kept, now }, settings)
-  const first = planBlocks(free, needs, kept, settings)
+  const owners = settings.groupByDay === false ? undefined : assignDays(getFreeTime(from, week.end, { ...data, blocks: kept, now }, settings), getModuleNeeds(data, settings, week, kept), settings)
+  const first = planBlocks(free, needs, kept, settings, owners)
   let placed = first.blocks.filter(b => new Date(b.start) < week.end)
 
   // fill the rest of the week
   const after = (needsFor) => {
     const booked = [...kept, ...placed.map(b => ({ ...b, state: 'accepted' }))]
     const freeLeft = getFreeTime(from, week.end, { ...data, blocks: booked, now }, settings)
-    placed = [...placed, ...planBlocks(freeLeft, needsFor(booked), booked, settings).blocks]
+    placed = [...placed, ...planBlocks(freeLeft, needsFor(booked), booked, settings, owners).blocks]
   }
   if (weekly) after(booked => revisionNeeds({ ...data, assessments: data.assessments.filter(a => planning.includes(a.module_id)) }, settings, week, booked, now))
   if (settings.trackOptional) after(booked => getModuleNeeds(data, settings, week, booked).filter(n => planning.includes(n.module_id)))
