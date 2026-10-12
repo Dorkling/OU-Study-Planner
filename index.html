@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OU Study Planner</title>
+  <meta name="description" content="Plan OU study around work, tutorials and deadlines">
+  <meta name="theme-color" content="#1d5c63">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    // set theme early to avoid a flash
+    try {
+      const theme = localStorage.getItem('theme')
+      if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme
+    } catch {}
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <noscript>OU Study Planner needs JavaScript turned on.</noscript>
+  <script src="vendor/vue.global.prod.js"></script>
+  <script src="vendor/dexie.min.js"></script>
+  <script src="vendor/fullcalendar.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

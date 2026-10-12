@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signing in</title>
+  <style>
+    body { margin: 2rem 1rem; font: 16px/1.5 system-ui, sans-serif; background: #f5f6f4; color: #1f2523; }
+    @media (prefers-color-scheme: dark) { body { background: #141917; color: #e5eae7; } }
+  </style>
+</head>
+<body>
+  <p>Signing in to Google Drive. This window should close by itself.</p>
+  <script>
+    // send the token back to the app and close
+    const params = new URLSearchParams(location.hash.slice(1))
+    history.replaceState(null, '', location.pathname)
+    localStorage.setItem('drive-result', JSON.stringify({
+      state: params.get('state'),
+      token: params.get('access_token'),
+      expiresIn: Number(params.get('expires_in')),
+      error: params.get('error')
+    }))
+    window.close()
+  </script>
+</body>
+</html>

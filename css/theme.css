@@ -1,0 +1,93 @@
+/* light, text contrast 4.5:1 or better */
+:root {
+  color-scheme: light;
+  --bg: #f5f6f4;
+  --surface: #ffffff;
+  --text: #1f2523;
+  --muted: #56615d;
+  --border: #d5dad7;
+  --accent: #1d5c63;
+  --on-accent: #ffffff;
+  --accent-soft: #e2eff0;
+  --danger: #a3302a;
+  --today: #eef5f5;
+
+  --work: #d3dae2;
+  --on-work: #1f2a35;
+  --blocked: #f2e2b0;
+  --on-blocked: #3d2f05;
+  --due: #a3302a;
+  --on-due: #ffffff;
+  --tutorial: #ddd3f0;
+  --on-tutorial: #2b1d4a;
+  --study: #1d5c63;
+  --on-study: #ffffff;
+  --suggested: #e2eff0;
+  --on-suggested: #123b40;
+  --free: #8fc79a;
+  --warn-bg: #fbeee0;
+  --warn-text: #5a2d00;
+}
+
+/* dark, chosen or from the system setting */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #141917;
+  --surface: #1d2422;
+  --text: #e5eae7;
+  --muted: #a0aca7;
+  --border: #36403c;
+  --accent: #74b9c1;
+  --on-accent: #0d1716;
+  --accent-soft: #23393b;
+  --danger: #ec8a82;
+  --today: #1f2d2c;
+
+  --work: #3a4552;
+  --on-work: #e8edf2;
+  --blocked: #5c4b19;
+  --on-blocked: #f7ecc8;
+  --due: #ec8a82;
+  --on-due: #1d0b09;
+  --tutorial: #45386a;
+  --on-tutorial: #ece6fb;
+  --study: #74b9c1;
+  --on-study: #0d1716;
+  --suggested: #23393b;
+  --on-suggested: #d4ecef;
+  --free: #3f7a4a;
+  --warn-bg: #3b2a17;
+  --warn-text: #f6dcbc;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #141917;
+    --surface: #1d2422;
+    --text: #e5eae7;
+    --muted: #a0aca7;
+    --border: #36403c;
+    --accent: #74b9c1;
+    --on-accent: #0d1716;
+    --accent-soft: #23393b;
+    --danger: #ec8a82;
+    --today: #1f2d2c;
+
+    --work: #3a4552;
+    --on-work: #e8edf2;
+    --blocked: #5c4b19;
+    --on-blocked: #f7ecc8;
+    --due: #ec8a82;
+    --on-due: #1d0b09;
+    --tutorial: #45386a;
+    --on-tutorial: #ece6fb;
+    --study: #74b9c1;
+    --on-study: #0d1716;
+    --suggested: #23393b;
+    --on-suggested: #d4ecef;
+    --free: #3f7a4a;
+    --warn-bg: #3b2a17;
+    --warn-text: #f6dcbc;
+  }
+}
