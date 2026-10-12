@@ -1,12 +1,13 @@
 import { settings, saveSetting } from './settings.js'
-import { exportData, applyRecords } from './backup.js'
-import { syncWith } from './merge.js'
+import { exportData, applyRecords, copyOnto } from './backup.js'
+import { syncWith, unpack, tables } from './merge.js'
 import { driveAvailable, savedToken, forgetToken, signIn, driveClient } from './drive.js'
 
 const { reactive } = Vue
 
 // status: off, waiting, syncing, signed-out or error
-export const syncState = reactive({ status: 'off', message: '', last: null })
+// choosing means drive and this device both have a plan and the user picks which to keep
+export const syncState = reactive({ status: 'off', message: '', last: null, choice: null })
 
 let running = false
 let changeTimer
@@ -58,11 +59,47 @@ export function startSync() {
   everyFewMinutes = setInterval(syncNow, 5 * 60000)
 }
 
+const modulesIn = data => data.modules.filter(m => !m.deleted).length
+const hasData = data => tables.some(table => table !== 'settings' && data[table].some(row => !row.deleted))
+
 // must be called from a click
+// a device joining a plan already in drive takes the drive copy, or asks first if it has its own plan too
 export async function connectDrive() {
-  await signIn()
+  const token = await signIn()
+  const remote = await driveClient(token).read()
+  const drive = remote && unpack(remote.text)
+
+  if (drive && hasData(drive)) {
+    const local = await exportData()
+    if (hasData(local)) {
+      syncState.status = 'choosing'
+      syncState.choice = { driveModules: modulesIn(drive), localModules: modulesIn(local) }
+      return
+    }
+    await copyOnto(drive)
+  }
+  await turnOn()
+}
+
+async function turnOn() {
+  syncState.choice = null
   await saveSetting('driveSync', true)
   startSync()
+}
+
+// replace this device with what's in drive, then carry on syncing as normal
+export async function useDriveCopy() {
+  const remote = await driveClient(savedToken()).read()
+  if (remote) await copyOnto(unpack(remote.text))
+  await turnOn()
+}
+
+// keep both, newest change of each record wins
+export const combineWithDrive = turnOn
+
+export function cancelConnect() {
+  syncState.choice = null
+  syncState.status = 'off'
 }
 
 export async function reconnectDrive() {

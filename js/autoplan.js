@@ -29,6 +29,16 @@ export async function autoPlan() {
     const now = new Date()
     let data = await loadAll()
 
+    // blocks left behind by a deleted module or assessment
+    const orphans = data.blocks.filter(b =>
+      !data.modules.some(m => m.id === b.module_id) ||
+      (b.assessment_id && !data.assessments.some(a => a.id === b.assessment_id))
+    )
+    if (orphans.length) {
+      await remove('blocks', orphans.map(b => b.id))
+      data = await loadAll()
+    }
+
     // suggestions that clash or no longer fit the block length settings are out of date
     const minutes = b => (new Date(b.end) - new Date(b.start)) / 60000
     const wrongLength = data.blocks.filter(b => b.state === 'suggested' && new Date(b.start) > now && (minutes(b) < settings.minBlock || minutes(b) > settings.maxBlock))

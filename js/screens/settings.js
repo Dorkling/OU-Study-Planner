@@ -6,7 +6,7 @@ import WorkPattern from '../components/work-pattern.js'
 import ZonePicker from '../components/zone-picker.js'
 import { downloadBackup, restoreBackup } from '../backup.js'
 import { canNotify, turnOnReminders, turnOffReminders } from '../notify.js'
-import { syncState, syncNow, connectDrive, reconnectDrive, disconnectDrive } from '../sync.js'
+import { syncState, syncNow, connectDrive, reconnectDrive, disconnectDrive, useDriveCopy, combineWithDrive, cancelConnect } from '../sync.js'
 import { driveAvailable } from '../drive.js'
 
 const byDate = (a, b) => a.date.localeCompare(b.date)
@@ -181,6 +181,18 @@ export default {
       <div class="card">
         <h2>Google Drive sync</h2>
         <p v-if="!driveAvailable()" class="hint">Drive sync isn't set up on this copy of the app. Use a backup to move your data instead.</p>
+        <template v-else-if="syncState.status === 'choosing'">
+          <p>Your Google Drive already has a study plan with {{ syncState.choice.driveModules }} {{ syncState.choice.driveModules === 1 ? 'module' : 'modules' }}, and this device has its own with {{ syncState.choice.localModules }}.</p>
+          <div class="choice">
+            <button class="primary" @click="drive(useDriveCopy)">Use the plan from Drive</button>
+            <p class="hint">Replaces everything on this device with the Drive copy. Best when adding a new phone or computer.</p>
+          </div>
+          <div class="choice">
+            <button @click="drive(combineWithDrive)">Combine both</button>
+            <p class="hint">Keeps everything from both. Where the same thing was changed on both, the newest change wins.</p>
+          </div>
+          <button class="link" @click="cancelConnect">Cancel</button>
+        </template>
         <template v-else-if="!settings.driveSync">
           <p>Syncs your devices using a file in an OU Study Planner folder in your Google Drive. The app can only see files it created.</p>
           <p v-if="driveError" class="hint error">{{ driveError }}</p>
@@ -336,7 +348,7 @@ export default {
     return {
       settings, exceptions, blocked, modeHints, dayRows, editDay, device, defaultZone, zoneName, themes,
       reminderError, driveError, restoreMode, restoreMessage, restoreFailed, syncState, syncText,
-      canNotify, toggleReminders, drive, connectDrive, reconnectDrive, disconnectDrive, syncNow,
+      canNotify, toggleReminders, drive, connectDrive, reconnectDrive, disconnectDrive, syncNow, useDriveCopy, combineWithDrive, cancelConnect,
       driveAvailable, downloadBackup, restore, dayNames, weekOrder, put, update, addException, addBlocked, setRepeat, remove
     }
   }

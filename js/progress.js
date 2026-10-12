@@ -1,4 +1,4 @@
-import { db, save, saveMany, loadAll, remove } from './db.js'
+import { db, save, saveMany, loadAll, remove, removeModule } from './db.js'
 import { settings } from './settings.js'
 import { planWeek } from './planner.js'
 import { hoursBetween, weekBounds } from './time.js'
@@ -93,6 +93,14 @@ export async function startCatchUp(module, hours, until, label) {
   const planned = (await loadAll()).blocks
     .filter(b => (b.state === 'suggested' || (b.state === 'accepted' && b.auto)) && new Date(b.start) > now && new Date(b.start) < new Date(until))
   await replanWeeks([weekOf(now), ...planned.map(b => weekOf(b.start))])
+}
+
+// deleting a module frees its upcoming time, so those weeks get planned again
+export async function deleteModule(module) {
+  const now = new Date()
+  const upcoming = (await loadAll()).blocks.filter(b => b.module_id === module.id && new Date(b.start) > now)
+  await removeModule(module.id)
+  await replanWeeks([weekOf(now), ...upcoming.map(b => weekOf(b.start))])
 }
 
 export async function stopCatchUp(module) {

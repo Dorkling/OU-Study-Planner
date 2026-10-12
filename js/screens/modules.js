@@ -1,10 +1,10 @@
-import { all, save, remove, removeModule, live } from '../db.js'
+import { all, save, remove, live } from '../db.js'
 import { weeklyHours, oneDecimal } from '../estimates.js'
 import { settings } from '../settings.js'
 import { shortDate, dateAndTime } from '../time.js'
 import { packModule, unpackModule, mergeModule } from '../share.js'
 import { downloadFile } from '../backup.js'
-import { markSubmitted, startCatchUp, stopCatchUp } from '../progress.js'
+import { markSubmitted, startCatchUp, stopCatchUp, deleteModule as deleteModuleAndReplan } from '../progress.js'
 import ModuleForm from '../components/module-form.js'
 import AssessmentForm from '../components/assessment-form.js'
 
@@ -137,7 +137,7 @@ export default {
 
     async function deleteModule(m) {
       if (!confirm(`Delete ${m.code} and all of its assessments?`)) return
-      await removeModule(m.id)
+      await deleteModuleAndReplan(m)
     }
 
     async function addAssessment(module, assessment) {

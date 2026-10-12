@@ -56,6 +56,7 @@ export async function removeModule(id) {
   for (const a of assessments) await removeAssessment(a)
   await remove('tasks', await db.tasks.where('module_id').equals(id).primaryKeys())
   await remove('tutorials', await db.tutorials.where('module_id').equals(id).primaryKeys())
+  await remove('blocks', await db.blocks.filter(b => b.module_id === id).primaryKeys())
   await remove('modules', id)
 }
 

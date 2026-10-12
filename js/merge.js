@@ -3,7 +3,7 @@
 export const tables = ['settings', 'work_pattern', 'blocked_time', 'exceptions', 'modules', 'assessments', 'tasks', 'tutorials', 'blocks']
 
 // per device settings, never synced
-const deviceOnly = ['driveSync', 'notifications']
+export const deviceOnly = ['driveSync', 'notifications']
 
 const keyOf = (table, row) => table === 'settings' ? row.key : row.id
 const travels = (table, row) => table !== 'settings' || !deviceOnly.includes(row.key)

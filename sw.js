@@ -1,5 +1,5 @@
 // bump when files change
-const version = 'v15'
+const version = 'v16'
 
 const files = [
   './',

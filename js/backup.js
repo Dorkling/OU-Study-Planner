@@ -1,5 +1,5 @@
 import { db } from './db.js'
-import { tables, pack, unpack, mergeData } from './merge.js'
+import { tables, pack, unpack, mergeData, deviceOnly } from './merge.js'
 import { settings, loadSettings } from './settings.js'
 import { dateKey } from './time.js'
 
@@ -32,6 +32,19 @@ export async function applyRecords(records) {
 
   await db.transaction('rw', changed.map(table => db[table]), async () => {
     for (const table of changed) await db[table].bulkPut(records[table])
+  })
+  await loadSettings()
+}
+
+// make this device an exact copy, keeping only this device's own settings
+// nothing is marked deleted, so it doesn't send anything back the other way
+export async function copyOnto(data) {
+  await db.transaction('rw', tables.map(table => db[table]), async () => {
+    for (const table of tables) {
+      const keep = table === 'settings' ? (await db.settings.toArray()).filter(row => deviceOnly.includes(row.key)) : []
+      await db[table].clear()
+      await db[table].bulkPut([...data[table].filter(row => table !== 'settings' || !deviceOnly.includes(row.key)), ...keep])
+    }
   })
   await loadSettings()
 }

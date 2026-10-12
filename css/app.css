@@ -341,3 +341,7 @@ details[open] summary { margin-bottom: .75rem; }
 .fc-timegrid-event-short .fc-event-main-frame { flex-direction: row; gap: .3rem; align-items: baseline; }
 .fc-timegrid-event-short .fc-event-time::after { content: ''; }
 .fc-timegrid-event-short .fc-event-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* drive connect choice */
+.choice { margin: .75rem 0; }
+.choice .hint { margin: .3rem 0 0; }

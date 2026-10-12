@@ -4,16 +4,24 @@ I made this to fit Open University study around shift work. You put in your shif
 
 It runs in the browser with no server or accounts. Your data stays on your device, and in your own Google Drive if you turn on sync.
 
+Use it here: https://dorkling.github.io/OU-Study-Planner/
+
 Not affiliated with or endorsed by The Open University.
 
 ## Features
 
-- Weekly study hours worked out from each module's credits (the OU guide is about 10 hours per credit)
+- Weekly study hours worked out from each module's credits (the OU guide is about 10 hours per credit), or set your own
 - Plans study around work, travel time, tutorials and anything else you block out, either as suggestions or straight into your week
+- Plan a week, a month, two months or right up to the end of your modules
+- Set which days you study, the times and how long, and mark the days you'd rather study so they get filled first
+- Keeps each module to its own days where it can
 - Spreads TMA work up to a few days before the deadline and warns you if it won't fit
+- Tells you if your modules need more time than you've got free, and shares what there is fairly
+- Tick off TMAs when they're submitted so the time goes back to other study
+- Catch up on a module you've fallen behind with by adding a few extra hours a week until the next TMA
 - Add tutorials by pasting the booking confirmation page or from a screenshot
 - Missed tutorials that were recorded get added as a "watch recording" task
-- Calendar export for Google or Apple Calendar, and reminders on Windows
+- Week and month views, calendar export for Google or Apple Calendar, and reminders on Windows
 - Share a module's dates with classmates
 - Works offline, light and dark mode, and any time zone (UK by default)
 
@@ -29,13 +37,15 @@ To use it on more than one device, either turn on Google Drive sync in Settings 
 
 Phones pause web apps in the background, so reminders won't work there. Use Add to calendar on the Week screen instead and import the file into a calendar called Study Planner.
 
+Found a bug or got an idea? Open an issue: https://github.com/dorkling/OU-Study-Planner/issues
+
 ## Running your own copy
 
 It's plain HTML, CSS and JavaScript with no build step, so any static host works.
 
 1. Fork this repo
 2. Turn on GitHub Pages for the main branch in the repo settings
-3. Open `https://<your-username>.github.io/ou-study-planner/`
+3. Open `https://<your-username>.github.io/<repo-name>/`
 
 Everything works except Drive sync, which needs a Google client ID for your address. You can skip it and use backups, or set one up:
 
@@ -75,3 +85,5 @@ These are saved in `vendor/` so the app works offline:
 ## Licence
 
 MIT, see `LICENSE`.
+
+Tests and small fixes assisted with claude code
