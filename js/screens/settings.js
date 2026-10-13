@@ -82,6 +82,8 @@ export default {
             </select>
           </label>
         </div>
+        <label class="check"><input type="checkbox" v-model="settings.oneAtATime" @change="put('oneAtATime')"> Only plan for each module's next assessment until it's submitted</label>
+        <p class="hint">Later TMAs and the EMA wait their turn. Weekly study from credits still fills the rest of the week.</p>
         <label class="check"><input type="checkbox" v-model="settings.groupByDay" @change="put('groupByDay')"> Keep each module to its own days where possible</label>
         <p class="hint">The module that needs the most time gets the biggest free day, and so on. If time is short, modules still share so none miss out.</p>
         <label class="check"><input type="checkbox" v-model="settings.trackOptional" @change="put('trackOptional')"> Plan weekly module study from credits</label>

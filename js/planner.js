@@ -145,7 +145,7 @@ export function planBlocks(free, needs, existing, settings, days = { owners: {},
 
   // hours this slot can take, 0 if none
   function hoursIn(slot, need, left) {
-    if (slot.taken || slot.end > need.target) return 0
+    if (slot.taken || slot.end > need.target || (need.notBefore && slot.start < need.notBefore)) return 0
     const limit = slot.workDay ? settings.workDayMaxHours : dayPlan(settings, weekdayOf(dayOf(slot))).maxHours
     const room = Math.floor((limit - (used[dayOf(slot)] || 0)) * 4) / 4
 
@@ -217,7 +217,8 @@ export function planBlocks(free, needs, existing, settings, days = { owners: {},
           st.stuck = true
           continue
         }
-        const aim = from + (st.need.target - from) / st.count * (st.turn + 0.5)
+        const start = Math.max(from, +(st.need.notBefore || 0))
+        const aim = start + (st.need.target - start) / st.count * (st.turn + 0.5)
         st.turn++
         const byDistance = (a, b) => Math.abs(a.start - aim) - Math.abs(b.start - aim)
 
@@ -315,6 +316,24 @@ export function assignDays(free, moduleNeeds, settings) {
   return { owners, shares }
 }
 
+// each module's next assessment still to do, as of a date, so later ones wait their turn
+// each assessment can start once the one before it in the module should have been finished,
+// so only work whose turn comes before the end of the week is returned, with the date it can start
+export function queuedWork(assessments, settings, from, until) {
+  const upcoming = assessments
+    .filter(a => !a.submitted && new Date(a.due) > from)
+    .sort((a, b) => a.due.localeCompare(b.due))
+
+  const ready = []
+  const finished = {}
+  for (const a of upcoming) {
+    const notBefore = finished[a.module_id]
+    if (!notBefore || notBefore < until) ready.push({ assessment: a, notBefore })
+    finished[a.module_id] = shiftDays(new Date(a.due), -settings.tmaBuffer, settings.timeZone)
+  }
+  return ready
+}
+
 // plan a week: assessments, then revision, then module study
 // modes is which planner modes to include
 export function planWeek(data, settings, now, weekOf, modes = ['auto', 'suggest']) {
@@ -339,8 +358,13 @@ export function planWeek(data, settings, now, weekOf, modes = ['auto', 'suggest'
 
   // plan up to the last target so the week gets its share
   const weekly = settings.revisionMode === 'weekly'
-  const assessments = data.assessments.filter(a => planning.includes(a.module_id) && !(weekly && isRevision(a)))
+  // by default only each module's next assessment gets time, the rest wait until it's submitted or due
+  const queue = settings.oneAtATime === false ? data.assessments.map(assessment => ({ assessment })) : queuedWork(data.assessments, settings, from, week.end)
+  const startsFrom = Object.fromEntries(queue.map(q => [q.assessment.id, q.notBefore]))
+  const current = queue.map(q => q.assessment)
+  const assessments = current.filter(a => planning.includes(a.module_id) && !(weekly && isRevision(a)))
   const needs = getNeeds({ ...data, assessments, blocks: [...kept, ...elsewhere] }, settings, now)
+    .map(n => ({ ...n, notBefore: startsFrom[n.assessment.id] }))
   const until = new Date(Math.max(week.end, ...needs.map(n => +n.target)))
   const free = getFreeTime(from, until, { ...data, blocks: kept, now }, settings)
   const owners = settings.groupByDay === false ? undefined : assignDays(getFreeTime(from, week.end, { ...data, blocks: kept, now }, settings), getModuleNeeds(data, settings, week, kept), settings)
@@ -353,7 +377,8 @@ export function planWeek(data, settings, now, weekOf, modes = ['auto', 'suggest'
     const freeLeft = getFreeTime(from, week.end, { ...data, blocks: booked, now }, settings)
     placed = [...placed, ...planBlocks(freeLeft, needsFor(booked), booked, settings, owners).blocks]
   }
-  if (weekly) after(booked => revisionNeeds({ ...data, assessments: data.assessments.filter(a => planning.includes(a.module_id)) }, settings, week, booked, now))
+  if (weekly) after(booked => revisionNeeds({ ...data, assessments: current.filter(a => planning.includes(a.module_id)) }, settings, week, booked, now)
+    .map(n => ({ ...n, notBefore: startsFrom[n.assessment.id] })))
   if (settings.trackOptional) after(booked => getModuleNeeds(data, settings, week, booked).filter(n => planning.includes(n.module_id)))
 
   const blocks = placed.map(b => {

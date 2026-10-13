@@ -10,6 +10,7 @@ export const defaults = {
   planStyle: 'spread',
   planAhead: 'week',
   groupByDay: true,
+  oneAtATime: true,
   days: null,
   minBlock: 30,
   maxBlock: 60,

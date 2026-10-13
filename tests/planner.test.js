@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto, assignDays } from '../js/planner.js'
+import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto, assignDays, queuedWork } from '../js/planner.js'
 
 import { zonedTime } from '../js/time.js'
 
@@ -492,4 +492,50 @@ test('turning it off lets modules share days', () => {
   const data = { ...emptyWeek, modules: modulesOn(30, 30, 30) }
   const { blocks } = planWeek(data, { ...planSettings, days: threeDays, groupByDay: false }, at(12, 8), at(12, 8))
   assert.equal(blocks.reduce((sum, b) => sum + hours(b), 0), 12)
+})
+
+// one module with two tmas and an ema at the end of the year
+const uk = (key, time) => zonedTime(key, time, 'Europe/London')
+const yearOfWork = [
+  { id: 'tma1', module_id: 'm1', type: 'tma', title: 'TMA 01', due: uk('2026-10-29', '12:00').toISOString() },
+  { id: 'tma2', module_id: 'm1', type: 'tma', title: 'TMA 02', due: uk('2026-12-10', '12:00').toISOString() },
+  { id: 'ema', module_id: 'm1', type: 'ema', title: 'EMA', due: uk('2027-05-20', '12:00').toISOString() }
+]
+const assessed = blocks => [...new Set(blocks.filter(b => b.assessment_id).map(b => b.assessment_id))].sort()
+
+test('only the next assessment is planned for', () => {
+  const { blocks } = planWeek({ ...emptyWeek, assessments: yearOfWork }, { ...planSettings, planStyle: 'spread' }, at(12, 8), at(12, 8))
+  assert.deepEqual(assessed(blocks), ['tma1'])
+})
+
+test('once the first is submitted the next one gets the time', () => {
+  const submitted = yearOfWork.map(a => a.id === 'tma1' ? { ...a, submitted: true } : a)
+  const { blocks } = planWeek({ ...emptyWeek, assessments: submitted }, { ...planSettings, planStyle: 'spread' }, at(12, 8), at(12, 8))
+  assert.deepEqual(assessed(blocks), ['tma2'])
+})
+
+test('planning ahead starts each assessment once the one before should have been finished', () => {
+  const { blocks } = planWeeks({ ...emptyWeek, assessments: yearOfWork }, { ...planSettings, planStyle: 'spread' }, at(12, 8), at(12, 8), 12)
+  const firstFor = id => blocks.filter(b => b.assessment_id === id).map(b => new Date(b.start)).sort((a, b) => a - b)[0]
+
+  // finish early is 3 days, so tma 01 should be done by 26 oct at noon and tma 02 by 7 dec
+  assert.ok(firstFor('tma2') >= uk('2026-10-26', '12:00'), 'tma 02 waits for tma 01 to be finished')
+  assert.ok(firstFor('tma2') < uk('2026-11-02', '00:00'), 'and starts the same week, not the week after')
+  assert.ok(firstFor('ema') >= uk('2026-12-07', '12:00'), 'the ema waits for tma 02 to be finished')
+})
+
+test('turning it off plans for everything at once', () => {
+  const { blocks } = planWeek({ ...emptyWeek, assessments: yearOfWork }, { ...planSettings, planStyle: 'spread', oneAtATime: false }, at(12, 8), at(12, 8))
+  assert.ok(assessed(blocks).length > 1)
+})
+
+test('the queue is per module and skips submitted and past work', () => {
+  const other = { id: 'other', module_id: 'm2', type: 'tma', title: 'TMA 01', due: uk('2026-11-20', '12:00').toISOString() }
+  const queue = queuedWork([...yearOfWork, other], planSettings, uk('2026-11-02', '00:00'), uk('2026-11-09', '00:00'))
+  assert.deepEqual(queue.map(q => q.assessment.id).sort(), ['other', 'tma2'])
+
+  // in the week tma 01 is due, tma 02 joins from tma 01's finish by date
+  const dueWeek = queuedWork(yearOfWork, planSettings, uk('2026-10-26', '00:00'), uk('2026-11-02', '00:00'))
+  assert.deepEqual(dueWeek.map(q => q.assessment.id), ['tma1', 'tma2'])
+  assert.equal(+dueWeek[1].notBefore, +uk('2026-10-26', '12:00'))
 })
