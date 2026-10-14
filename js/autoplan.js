@@ -5,7 +5,6 @@ import { weekBounds } from './time.js'
 
 let running = false
 let changeTimer
-let everyQuarterHour
 
 // start of the week each block is in, earliest first, no repeats
 function weeksOf(blocks) {
@@ -22,7 +21,7 @@ async function replan(weekOf, modes) {
 }
 
 // keep the plan in line with shifts, study hours and anything else that changes
-export async function autoPlan() {
+export async function autoPlan(changed = true) {
   if (running) return
   running = true
   try {
@@ -53,6 +52,13 @@ export async function autoPlan() {
     // keep auto modules planned from this week to the last week that has auto blocks, in one run
     const isAuto = id => (data.modules.find(m => m.id === id)?.mode_override || settings.plannerMode) === 'auto'
     if (!data.modules.some(m => isAuto(m.id))) return
+
+    // on opening nothing has changed but the time, so a plan that still fits is left where it is
+    const week = weekBounds(now, settings.timeZone)
+    const planned = data.blocks.some(b => b.auto && b.state === 'accepted' && new Date(b.start) > now && new Date(b.start) < week.end)
+    const broken = findClashes(data, settings, now).some(c => c.block.auto)
+    if (!changed && planned && !broken) return
+
     const result = replanAuto(data, settings, now)
     if (result.unchanged) return
     await remove('blocks', result.remove)
@@ -62,13 +68,12 @@ export async function autoPlan() {
   }
 }
 
+// replan whenever something changes, not on a timer, so the plan doesn't move just because time passed
 export function startAutoPlan() {
-  clearInterval(everyQuarterHour)
-  autoPlan()
-  everyQuarterHour = setInterval(autoPlan, 15 * 60000)
+  autoPlan(false)
 }
 
 Dexie.on('storagemutated', () => {
   clearTimeout(changeTimer)
-  changeTimer = setTimeout(autoPlan, 3000)
+  changeTimer = setTimeout(() => autoPlan(), 3000)
 })

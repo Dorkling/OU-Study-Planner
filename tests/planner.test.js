@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto, assignDays, queuedWork, studyFirst } from '../js/planner.js'
+import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto, assignDays, queuedWork, studyFirst, joinTouching } from '../js/planner.js'
 
 import { zonedTime } from '../js/time.js'
 import { dayPlan } from '../js/freetime.js'
@@ -480,6 +480,19 @@ test('a spare day goes to the module that needs the most time', () => {
   assert.deepEqual([count('M0'), count('M1'), count('M2')], [2, 1, 1])
 })
 
+test('a day keeps the module of blocks you put there yourself', () => {
+  const data = { ...emptyWeek, modules: modulesOn(60, 30, 30) }
+  const mine = [{ module_id: 'M2', state: 'accepted', byUser: true, start: at(12, 9).toISOString(), end: at(12, 12).toISOString() }]
+  const owners = assignDays(
+    [1, 3, 5, 6].map(d => ({ start: at(11 + d, 9), end: at(11 + d, 21) })),
+    data.modules.map(m => ({ module_id: m.id, weekly: m.credits / 3 })),
+    { ...planSettings, days: fourDays },
+    mine
+  )
+  assert.equal(owners.owners['2026-10-12'], 'M2')
+  assert.equal(Object.values(owners.owners).filter(o => o === 'M2').length, 1)
+})
+
 test('tma work goes on its own module days too', () => {
   const data = { ...emptyWeek, modules: modulesOn(30, 30, 30), assessments: [{ id: 't', module_id: 'M1', type: 'tma', title: 'TMA', due: at(30, 12).toISOString() }] }
   const { blocks } = planWeek(data, { ...planSettings, days: threeDays, hoursPerTma: 4 }, at(12, 8), at(12, 8))
@@ -624,4 +637,35 @@ test('study first never makes a run longer or changes block lengths', () => {
   assert.deepEqual(out.map(b => (new Date(b.end) - new Date(b.start)) / 60000), [60, 30, 120])
   assert.equal(out[0].start, run[0].start)
   assert.equal(out.at(-1).end, run.at(-1).end)
+})
+
+test('time already studied is not booked again just because it has passed', () => {
+  const data = { ...emptyWeek, assessments: [{ ...tma('t1', 30), type: 'tma' }] }
+  const past = { id: 'p', module_id: 'm1', assessment_id: 't1', state: 'accepted', start: at(12, 9).toISOString(), end: at(12, 11).toISOString() }
+  const before = getNeeds({ ...data, blocks: [past] }, planSettings, at(12, 8))[0].remaining
+  const after = getNeeds({ ...data, blocks: [past] }, planSettings, at(12, 12))[0].remaining
+  assert.equal(after, before, 'the remaining hours stay the same once the block is in the past')
+
+  // marking it missed puts the hours back
+  const missed = getNeeds({ ...data, blocks: [{ ...past, state: 'missed' }] }, planSettings, at(12, 12))[0].remaining
+  assert.equal(missed, before + 2)
+})
+
+test('blocks of the same work with no gap become one, up to the longest block', () => {
+  const block = (from, to, extra = {}) => ({ module_id: 'm1', assessment_id: null, task_id: null, start: at(12, ...from).toISOString(), end: at(12, ...to).toISOString(), ...extra })
+  const joined = joinTouching([block([14, 0], [15, 0]), block([15, 0], [17, 0]), block([17, 0], [19, 0], { assessment_id: 't1' })], { ...planSettings, maxBlock: 240 })
+  assert.deepEqual(joined.map(b => [b.start, b.end, b.assessment_id]), [[at(12, 14).toISOString(), at(12, 17).toISOString(), null], [at(12, 17).toISOString(), at(12, 19).toISOString(), 't1']])
+
+  // never longer than the longest block
+  const capped = joinTouching([block([14, 0], [16, 0]), block([16, 0], [18, 0])], { ...planSettings, maxBlock: 180 })
+  assert.equal(capped.length, 2)
+})
+
+test('an auto plan stays put as the hours go by during the day', () => {
+  const data = { ...emptyWeek, modules: [{ ...module, mode_override: 'auto' }], assessments: [{ ...tma('t1', 30), type: 'tma' }] }
+  const settingsSpread = { ...planSettings, planStyle: 'spread' }
+  const morning = planWeeks(data, settingsSpread, at(12, 8), at(12, 8), 1).blocks
+  for (const hour of [10, 13, 16]) {
+    assert.equal(replanAuto({ ...data, blocks: morning }, settingsSpread, at(12, hour)).unchanged, true, `still the same at ${hour}:00`)
+  }
 })

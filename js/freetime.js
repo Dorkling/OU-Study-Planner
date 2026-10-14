@@ -130,10 +130,13 @@ export function getFreeTime(from, to, data, settings) {
   const grid = buildStudyGrid(dayStart, to, shifts, settings)
   const busy = getBusy(dayStart, to, data, settings)
 
+  // remember where each free stretch really starts, so blocks are cut on the same grid all day
+  const open = subtractTimes(grid, busy).filter(f => f.end > f.start).map(f => ({ ...f, anchor: +f.start }))
+
   // remove anything before now
   const now = nextQuarter(data.now || new Date())
   const cutoff = new Date(Math.max(now, from))
-  return subtractTimes(grid, [...busy, { start: new Date(0), end: cutoff }])
+  return subtractTimes(open, [{ start: new Date(0), end: cutoff }])
     .filter(f => f.end > f.start)
 }
 
@@ -145,7 +148,9 @@ export function cutSlots(free, settings) {
   const slots = []
 
   for (const f of free) {
+    // line up with the stretch's own start so the blocks don't creep later as the day goes on
     let start = +f.start
+    if (f.anchor < start) start = f.anchor + Math.ceil((start - f.anchor) / (max + gap)) * (max + gap)
     while (f.end - start >= min) {
       const length = Math.min(max, f.end - start)
       slots.push({ ...f, start: new Date(start), end: new Date(start + length) })
