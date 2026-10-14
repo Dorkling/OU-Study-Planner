@@ -1,5 +1,5 @@
 // bump when files change, people are asked before a new version takes over
-const version = 'v19'
+const version = 'v21'
 
 // the screenshot reader is big and rarely changes, so it keeps its own cache between versions
 const ocrCache = 'tesseract-5.1.1'
@@ -39,6 +39,7 @@ const files = [
   'js/progress.js',
   'js/autoplan.js',
   'js/updates.js',
+  'js/habits.js',
   'js/planner.js',
   'js/tutorials.js',
   'js/components/module-form.js',

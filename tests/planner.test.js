@@ -1,8 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto, assignDays, queuedWork } from '../js/planner.js'
+import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto, assignDays, queuedWork, studyFirst } from '../js/planner.js'
 
 import { zonedTime } from '../js/time.js'
+import { dayPlan } from '../js/freetime.js'
 
 // october 2026 in uk time, the clocks go back on the 25th
 const at = (day, h, m = 0) => zonedTime(`2026-10-${String(day).padStart(2, '0')}`, `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, 'Europe/London')
@@ -538,4 +539,89 @@ test('the queue is per module and skips submitted and past work', () => {
   const dueWeek = queuedWork(yearOfWork, planSettings, uk('2026-10-26', '00:00'), uk('2026-11-02', '00:00'))
   assert.deepEqual(dueWeek.map(q => q.assessment.id), ['tma1', 'tma2'])
   assert.equal(+dueWeek[1].notBefore, +uk('2026-10-26', '12:00'))
+})
+
+test('each module works on its own next assessment, so two modules get two tmas at once', () => {
+  const twoModules = [{ ...module, id: 'A' }, { ...module, id: 'B' }]
+  const work = [
+    { id: 'a1', module_id: 'A', type: 'tma', title: 'TMA 01', due: uk('2026-10-29', '12:00').toISOString() },
+    { id: 'a2', module_id: 'A', type: 'tma', title: 'TMA 02', due: uk('2026-12-10', '12:00').toISOString() },
+    { id: 'b1', module_id: 'B', type: 'tma', title: 'TMA 01', due: uk('2026-10-29', '12:00').toISOString() },
+    { id: 'b2', module_id: 'B', type: 'tma', title: 'TMA 02', due: uk('2026-12-10', '12:00').toISOString() }
+  ]
+  const { blocks } = planWeek({ ...emptyWeek, modules: twoModules, assessments: work }, { ...planSettings, planStyle: 'spread' }, at(12, 8), at(12, 8))
+  assert.deepEqual(assessed(blocks), ['a1', 'b1'])
+})
+
+// weekday evenings normally, the weekend only if needed
+const evening = { study: true, start: '18:00', end: '21:00', maxHours: 3, use: 'normal' }
+const weekendIfNeeded = { study: true, start: '09:00', end: '21:00', maxHours: 4, use: 'backup' }
+const backupWeek = { 1: evening, 2: evening, 3: evening, 4: evening, 5: evening, 6: weekendIfNeeded, 0: weekendIfNeeded }
+const onWeekend = blocks => blocks.filter(b => ['Sat', 'Sun'].includes(dayLabel(b)))
+
+test('only if needed days stay empty while the other days have room', () => {
+  const data = { ...emptyWeek, assessments: [{ ...tma('t1', 30), type: 'tma' }] }
+  const { blocks } = planWeek(data, { ...planSettings, days: backupWeek, hoursPerTma: 4, planStyle: 'spread' }, at(12, 8), at(12, 8))
+  assert.ok(blocks.length > 0)
+  assert.equal(onWeekend(blocks).length, 0)
+})
+
+test('only if needed days are used when a tma would not fit otherwise', () => {
+  // due this saturday with no finish early, 15 weekday hours free but 20 needed
+  const data = { ...emptyWeek, assessments: [{ id: 'soon', module_id: 'm1', type: 'tma', title: 'TMA', due: at(18, 20).toISOString() }] }
+  const { blocks } = planWeek(data, { ...planSettings, days: backupWeek, hoursPerTma: 20, tmaBuffer: 0, trackOptional: false }, at(12, 8), at(12, 8))
+  assert.ok(onWeekend(blocks).length > 0)
+  assert.equal(blocks.reduce((sum, b) => sum + hours(b), 0), 20)
+})
+
+test('weekly study from credits never goes on only if needed days', () => {
+  const { blocks } = planWeek(emptyWeek, { ...planSettings, days: backupWeek }, at(12, 8), at(12, 8))
+  assert.equal(onWeekend(blocks).length, 0)
+})
+
+test('an older save with a preferred tick still counts as preferred', () => {
+  const old = { 1: { study: true, start: '09:00', end: '21:00', maxHours: 4, preferred: true } }
+  assert.equal(dayPlanFor(old, 1).use, 'preferred')
+  assert.equal(dayPlanFor(old, 2).use, 'normal')
+})
+
+function dayPlanFor(days, weekday) {
+  return dayPlan({ ...planSettings, days }, weekday)
+}
+
+// study only on mondays and wednesdays, 9 to 9, up to 4 hours
+const twoLongDays = { ...threeDays, 1: studyDay, 3: studyDay, 5: noStudy }
+const gapsOn = (blocks, day) => {
+  const list = blocks.filter(b => dayLabel(b) === day).sort((a, b) => a.start.localeCompare(b.start))
+  return list.slice(1).map((b, i) => (new Date(b.start) - new Date(list[i].end)) / 60000)
+}
+
+test('a day of study is kept together in one session', () => {
+  const { blocks } = planWeek(emptyWeek, { ...planSettings, days: twoLongDays, planStyle: 'spread' }, at(12, 8), at(12, 8))
+  for (const day of ['Mon', 'Wed']) {
+    assert.ok(gapsOn(blocks, day).length > 0, `${day} has more than one block`)
+    assert.ok(gapsOn(blocks, day).every(g => g === 15), `${day} blocks are back to back with a break`)
+  }
+})
+
+test('tma work comes after study on the same day', () => {
+  const data = { ...emptyWeek, assessments: [{ ...tma('t1', 30), type: 'tma' }] }
+  const { blocks } = planWeek(data, { ...planSettings, days: twoLongDays, planStyle: 'spread', hoursPerTma: 4 }, at(12, 8), at(12, 8))
+  for (const day of ['Mon', 'Wed']) {
+    const dayBlocks = blocks.filter(b => dayLabel(b) === day).sort((a, b) => a.start.localeCompare(b.start))
+    const firstTma = dayBlocks.findIndex(b => b.assessment_id)
+    if (firstTma < 0) continue
+    assert.ok(dayBlocks.slice(firstTma).every(b => b.assessment_id), `${day}: nothing but tma work after the first tma block`)
+  }
+  assert.ok(blocks.some(b => b.assessment_id))
+})
+
+test('study first never makes a run longer or changes block lengths', () => {
+  const block = (start, end, assessment) => ({ module_id: 'm1', assessment_id: assessment, task_id: null, start: at(12, ...start).toISOString(), end: at(12, ...end).toISOString() })
+  const run = [block([9, 0], [11, 0], 't1'), block([11, 15], [12, 15], null), block([12, 30], [13, 0], null)]
+  const out = studyFirst(run, planSettings)
+  assert.deepEqual(out.map(b => b.assessment_id), [null, null, 't1'])
+  assert.deepEqual(out.map(b => (new Date(b.end) - new Date(b.start)) / 60000), [60, 30, 120])
+  assert.equal(out[0].start, run[0].start)
+  assert.equal(out.at(-1).end, run.at(-1).end)
 })

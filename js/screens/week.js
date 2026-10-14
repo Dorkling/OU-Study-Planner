@@ -4,7 +4,8 @@ import { getShifts, getBlocked, getFreeTime, getBusy, dayPlan } from '../freetim
 import { getNeeds, moduleWeekSummary, planWeeks, weeksToEnd, checkRisks, findClashes } from '../planner.js'
 import CapacityNote from '../components/capacity-note.js'
 import { moveClashes, markSubmitted } from '../progress.js'
-import { dateKey, clockTime, shortDate, weekBounds, toWall, fromWall } from '../time.js'
+import { recordMove, habitSuggestion, acceptHabit, dismissHabit } from '../habits.js'
+import { dateKey, clockTime, shortDate, weekBounds, toWall, fromWall, dayNames } from '../time.js'
 import { oneDecimal } from '../estimates.js'
 import { calendarEvents, buildCalendar } from '../ics.js'
 import { downloadFile } from '../backup.js'
@@ -47,6 +48,15 @@ export default {
       </div>
 
       <CapacityNote />
+
+      <div v-if="habit" class="notice">
+        <p v-if="habit.use === 'backup'">You've moved study off {{ dayNames[habit.weekday] }}s a few times. Only use {{ dayNames[habit.weekday] }}s when needed from now on?</p>
+        <p v-else>You've moved study onto {{ dayNames[habit.weekday] }}s a few times. Make {{ dayNames[habit.weekday] }} a preferred day?</p>
+        <div class="actions">
+          <button class="primary" @click="acceptHabit(habit)">Yes</button>
+          <button @click="dismissHabit(habit)">No thanks</button>
+        </div>
+      </div>
 
       <div v-if="clashes.length" class="notice warn">
         <p>{{ clashes.length }} study {{ clashes.length === 1 ? 'block clashes' : 'blocks clash' }} with your work, blocked time or study hours. They're marked in red.</p>
@@ -314,9 +324,13 @@ export default {
       clearPick()
     }
 
+    // spot a pattern in where blocks get dragged, see habits.js
+    const habit = computed(() => data.value && settings.habits ? habitSuggestion() : null)
+
     // moving a block accepts it
     function moved(info) {
       const block = info.event.extendedProps.block
+      if (info.oldEvent) recordMove(new Date(block.start), fromWall(info.event.start, zone()))
       const start = fromWall(info.event.start, zone())
       const end = fromWall(info.event.end, zone())
       save('blocks', { ...block, start: start.toISOString(), end: end.toISOString(), state: block.state === 'done' ? 'done' : 'accepted', auto: false, byUser: true })
@@ -389,7 +403,7 @@ export default {
     })
 
     return {
-      el, message, viewType, markSubmitted, planning, settings, saveSetting, atRisk, clashes, clashOf, moveAll, selected, picked, pickedFor, needs, modules, moduleWeek, canPlan, suggestedCount,
+      el, message, viewType, markSubmitted, habit, acceptHabit, dismissHabit, dayNames, planning, settings, saveSetting, atRisk, clashes, clashOf, moveAll, selected, picked, pickedFor, needs, modules, moduleWeek, canPlan, suggestedCount,
       code, label, partTitle, dayText, whenText, oneDecimal, plan, exportCalendar, accept, acceptAll, dismiss, clearPick, addBlock
     }
   }

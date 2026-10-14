@@ -1,5 +1,6 @@
 import { db } from './db.js'
-import { defaultZone } from './time.js'
+import { defaultZone, weekOrder } from './time.js'
+import { dayPlan } from './freetime.js'
 
 const { reactive } = Vue
 
@@ -11,7 +12,10 @@ export const defaults = {
   planAhead: 'week',
   groupByDay: true,
   oneAtATime: true,
+  solidBlocks: true,
+  tmaLast: true,
   days: null,
+  habits: null,
   minBlock: 30,
   maxBlock: 60,
   breakMins: 15,
@@ -62,4 +66,12 @@ export function applyTheme(theme) {
 
   // also kept in localStorage for index.html
   try { localStorage.setItem('theme', theme) } catch {}
+}
+
+// change one thing about a study day, saving the whole week so older single window settings become per day
+export function setDay(weekday, field, value) {
+  if ((field === 'start' || field === 'end') && !value) return
+  const days = Object.fromEntries(weekOrder.map(d => [d, { ...dayPlan(settings, d) }]))
+  days[weekday][field] = value
+  return saveSetting('days', days)
 }

@@ -136,11 +136,24 @@ export function planBlocks(free, needs, existing, settings, days = { owners: {},
     return (booked[module] || 0) < (days.shares[module] ?? Infinity) ? 0 : 1
   }
 
-  // hours already booked each day
+  // hours already booked each day, and the blocks themselves for keeping a day's study together
   const used = {}
+  const onDay = {}
   for (const b of existing.filter(b => b.state === 'accepted' || b.state === 'done')) {
     const key = dateKey(new Date(b.start), zone)
     used[key] = (used[key] || 0) + hoursBetween(new Date(b.start), new Date(b.end))
+    ;(onDay[key] ??= []).push({ start: new Date(b.start), end: new Date(b.end) })
+  }
+
+  // how far a slot sits from the nearest block already on its day
+  const gapTo = slot => Math.min(...(onDay[dayOf(slot)] || []).map(b => Math.min(Math.abs(slot.start - b.end), Math.abs(b.start - slot.end))))
+
+  // the day is chosen already, now pick where in it: tma work last, otherwise next to what's there
+  function withinDay(pick, need, candidates) {
+    const sameDay = candidates.filter(slot => dayOf(slot) === dayOf(pick))
+    if (need.assessment && settings.tmaLast !== false) return sameDay.sort((a, b) => b.start - a.start)[0] || pick
+    if (settings.solidBlocks !== false && onDay[dayOf(pick)]?.length) return sameDay.sort((a, b) => gapTo(a) - gapTo(b) || a.start - b.start)[0] || pick
+    return pick
   }
 
   // hours this slot can take, 0 if none
@@ -175,6 +188,7 @@ export function planBlocks(free, needs, existing, settings, days = { owners: {},
 
     used[dayOf(slot)] = (used[dayOf(slot)] || 0) + hours
     booked[moduleOf(need)] = (booked[moduleOf(need)] || 0) + hours
+    ;(onDay[dayOf(slot)] ??= []).push({ start: new Date(slot.start), end })
 
     // keep the rest of the slot after a break
     slot.start = new Date(+end + settings.breakMins * 60000)
@@ -224,15 +238,16 @@ export function planBlocks(free, needs, existing, settings, days = { owners: {},
 
         // within the same week: the module's own day first, then a slot that takes a full block, then a preferred day, then the nearest
         const full = Math.min(st.left, settings.maxBlock / 60)
-        const usable = slots.filter(slot => hoursIn(slot, st.need, st.left))
+        const usable = slots.filter(slot => !slot.backup && hoursIn(slot, st.need, st.left))
         const isFull = slot => hoursIn(slot, st.need, st.left) >= full ? 1 : 0
         const sameWeek = usable.filter(slot => Math.abs(slot.start - aim) <= 3.5 * 86400000)
         const ranked = sameWeek.sort((a, b) => tierOf(a, st.need) - tierOf(b, st.need) || isFull(b) - isFull(a) || b.preferred - a.preferred || byDistance(a, b))
-        const nearest = ranked[0] || usable.filter(isFull).sort(byDistance)[0] || usable.sort(byDistance)[0]
+        let nearest = ranked[0] || usable.filter(isFull).sort(byDistance)[0] || usable.sort(byDistance)[0]
         if (!nearest) {
           st.stuck = true
           continue
         }
+        nearest = withinDay(nearest, st.need, usable.filter(slot => tierOf(slot, st.need) === tierOf(nearest, st.need) && isFull(slot) === isFull(nearest)))
         st.left -= place(nearest, st.need, hoursIn(nearest, st.need, st.left), st.parts)
       }
       states.forEach(st => { st.stuck = false })
@@ -242,12 +257,20 @@ export function planBlocks(free, needs, existing, settings, days = { owners: {},
     for (const tier of [0, 1, 2]) {
       for (const preferredOnly of [true, false]) {
         for (const slot of slots) {
-          if (preferredOnly && !slot.preferred) continue
+          if (slot.backup || (preferredOnly && !slot.preferred)) continue
           let st
           while (!slot.taken && (st = next(st => tierOf(slot, st.need) <= tier && hoursIn(slot, st.need, st.left) > 0))) {
             st.left -= place(slot, st.need, hoursIn(slot, st.need, st.left), st.parts)
           }
         }
+      }
+    }
+
+    // only if needed days are a last resort, and only for assessment work that wouldn't fit otherwise
+    for (const slot of slots.filter(slot => slot.backup)) {
+      let st
+      while (!slot.taken && (st = next(st => st.need.assessment && hoursIn(slot, st.need, st.left) > 0))) {
+        st.left -= place(slot, st.need, hoursIn(slot, st.need, st.left), st.parts)
       }
     }
 
@@ -294,10 +317,11 @@ export function assignDays(free, moduleNeeds, settings) {
   for (const f of free) {
     const key = f.key || dateKey(f.start, zone)
     const limit = f.workDay ? settings.workDayMaxHours : dayPlan(settings, weekdayOf(key)).maxHours
-    days[key] ??= { key, hours: 0, limit }
+    days[key] ??= { key, hours: 0, limit, backup: f.backup }
     days[key].hours += hoursBetween(f.start, f.end)
   }
   const biggest = Object.values(days)
+    .filter(d => !d.backup)
     .map(d => ({ key: d.key, hours: Math.min(d.hours, d.limit) }))
     .filter(d => d.hours * 60 >= settings.minBlock)
     .sort((a, b) => b.hours - a.hours || a.key.localeCompare(b.key))
@@ -332,6 +356,46 @@ export function queuedWork(assessments, settings, from, until) {
     finished[a.module_id] = shiftDays(new Date(a.due), -settings.tmaBuffer, settings.timeZone)
   }
   return ready
+}
+
+// in each run of back to back blocks, study goes first and tma work after, so you read then write
+// lengths stay the same and the run never gets longer, so nothing moves onto other plans
+export function studyFirst(blocks, settings) {
+  if (settings.tmaLast === false) return blocks
+  const zone = settings.timeZone
+  const gap = settings.breakMins * 60000
+  const days = {}
+  for (const b of blocks) (days[dateKey(new Date(b.start), zone)] ??= []).push(b)
+
+  const out = []
+  for (const dayBlocks of Object.values(days)) {
+    const sorted = [...dayBlocks].sort((a, b) => a.start.localeCompare(b.start))
+    const runs = []
+    for (const b of sorted) {
+      const run = runs.at(-1)
+      if (run && new Date(b.start) - new Date(run.at(-1).end) <= gap + 60000) run.push(b)
+      else runs.push([b])
+    }
+
+    for (const run of runs) {
+      const firstTma = run.findIndex(b => b.assessment_id)
+      const studyAfter = run.findLastIndex(b => !b.assessment_id)
+      if (firstTma < 0 || studyAfter < firstTma) {
+        out.push(...run)
+        continue
+      }
+
+      let at = +new Date(run[0].start)
+      for (const b of [...run.filter(b => !b.assessment_id), ...run.filter(b => b.assessment_id)]) {
+        const length = new Date(b.end) - new Date(b.start)
+        const moved = { ...b, start: new Date(at).toISOString(), end: new Date(at + length).toISOString() }
+        const { id, ...content } = moved
+        out.push({ ...moved, id: blockId(content) })
+        at += length + gap
+      }
+    }
+  }
+  return out.sort((a, b) => a.start.localeCompare(b.start))
 }
 
 // plan a week: assessments, then revision, then module study
@@ -381,7 +445,7 @@ export function planWeek(data, settings, now, weekOf, modes = ['auto', 'suggest'
     .map(n => ({ ...n, notBefore: startsFrom[n.assessment.id] })))
   if (settings.trackOptional) after(booked => getModuleNeeds(data, settings, week, booked).filter(n => planning.includes(n.module_id)))
 
-  const blocks = placed.map(b => {
+  const blocks = studyFirst(placed, settings).map(b => {
     const auto = modeOf(b.module_id) === 'auto'
     return { ...b, state: auto ? 'accepted' : 'suggested', auto }
   })
@@ -501,7 +565,7 @@ export function bookableHours(data, settings, week, now) {
   }
 
   const perDay = {}
-  for (const slot of slots) {
+  for (const slot of slots.filter(slot => !slot.backup)) {
     perDay[slot.key] ??= { hours: 0, limit: slot.workDay ? settings.workDayMaxHours : dayPlan(settings, weekdayOf(slot.key)).maxHours }
     perDay[slot.key].hours += hoursBetween(slot.start, slot.end)
   }

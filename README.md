@@ -13,8 +13,9 @@ Not affiliated with or endorsed by The Open University.
 - Weekly study hours worked out from each module's credits (the OU guide is about 10 hours per credit), or set your own
 - Plans study around work, travel time, tutorials and anything else you block out, either as suggestions or straight into your week
 - Plan a week, a month, two months or right up to the end of your modules
-- Set which days you study, the times and how long, and mark the days you'd rather study so they get filled first
-- Keeps each module to its own days where it can
+- Set which days you study, the times and how long, and whether each day is preferred, normal or only used if needed
+- Notices if you keep moving study off or onto a day and offers to change that day for you
+- Keeps each module to its own days where it can, with each day's study in one session and TMA work after the reading
 - Spreads TMA work up to a few days before the deadline and warns you if it won't fit
 - Tells you if your modules need more time than you've got free, and shares what there is fairly
 - Tick off TMAs when they're submitted so the time goes back to other study

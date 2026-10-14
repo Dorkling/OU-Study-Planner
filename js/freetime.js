@@ -64,14 +64,15 @@ export function subtractTimes(free, busy) {
 }
 
 // study settings for a weekday, falling back to the older single window and days off
+// use is preferred, normal or backup (only if needed), older saves only had a preferred tick
 export function dayPlan(settings, weekday) {
-  return settings.days?.[weekday] || {
+  const day = settings.days?.[weekday] || {
     study: !(settings.daysOff || []).includes(weekday),
     start: settings.studyWindow?.start,
     end: settings.studyWindow?.end,
-    maxHours: settings.maxHoursPerDay,
-    preferred: false
+    maxHours: settings.maxHoursPerDay
   }
+  return { ...day, use: day.use || (day.preferred ? 'preferred' : 'normal') }
 }
 
 // study window for each day
@@ -88,7 +89,7 @@ export function buildStudyGrid(from, to, shifts, settings) {
     if (workDay && !settings.studyOnWorkDays) continue
 
     const window = workDay ? settings.workDayWindow : plan
-    grid.push({ ...clockRange(key, window.start, window.end, zone), key, workDay, preferred: !workDay && plan.preferred })
+    grid.push({ ...clockRange(key, window.start, window.end, zone), key, workDay, preferred: !workDay && plan.use === 'preferred', backup: !workDay && plan.use === 'backup' })
   }
 
   return grid

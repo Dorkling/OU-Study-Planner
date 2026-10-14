@@ -1,5 +1,5 @@
 import { all, save, remove, live } from '../db.js'
-import { settings, saveSetting } from '../settings.js'
+import { settings, saveSetting, setDay } from '../settings.js'
 import { dayNames, weekOrder, dateKey, defaultZone, deviceZone } from '../time.js'
 import { dayPlan } from '../freetime.js'
 import WorkPattern from '../components/work-pattern.js'
@@ -84,6 +84,9 @@ export default {
         </div>
         <label class="check"><input type="checkbox" v-model="settings.oneAtATime" @change="put('oneAtATime')"> Only plan for each module's next assessment until it's submitted</label>
         <p class="hint">Later TMAs and the EMA wait their turn. Weekly study from credits still fills the rest of the week.</p>
+        <label class="check"><input type="checkbox" v-model="settings.solidBlocks" @change="put('solidBlocks')"> Keep each day's study together in one session</label>
+        <label class="check"><input type="checkbox" v-model="settings.tmaLast" @change="put('tmaLast')"> Put TMA work after study on the same day</label>
+        <p class="hint">So you read and study first, then write.</p>
         <label class="check"><input type="checkbox" v-model="settings.groupByDay" @change="put('groupByDay')"> Keep each module to its own days where possible</label>
         <p class="hint">The module that needs the most time gets the biggest free day, and so on. If time is short, modules still share so none miss out.</p>
         <label class="check"><input type="checkbox" v-model="settings.trackOptional" @change="put('trackOptional')"> Plan weekly module study from credits</label>
@@ -92,17 +95,21 @@ export default {
 
       <div class="card">
         <h2>When you study</h2>
-        <p class="hint">Tick the days you study and when you're free. Preferred days get filled first, so give a day you like a long session more hours.</p>
+        <p class="hint">Tick the days you study and when you're free. Preferred days get filled first. Only if needed days stay free unless a TMA or EMA won't fit otherwise.</p>
         <div class="days">
           <div class="day-row day-head" aria-hidden="true">
-            <span>Day</span><span>From</span><span>To</span><span>Max hours</span><span></span>
+            <span>Day</span><span>From</span><span>To</span><span>Max hours</span><span>Use</span>
           </div>
           <div v-for="d in dayRows" :key="d.weekday" class="day-row" :class="{ off: !d.study }">
             <label class="check"><input type="checkbox" :checked="d.study" @change="editDay(d.weekday, 'study', $event.target.checked)"> {{ dayNames[d.weekday] }}</label>
             <input type="time" :value="d.start" :disabled="!d.study" @change="editDay(d.weekday, 'start', $event.target.value)" :aria-label="dayNames[d.weekday] + ' from'">
             <input type="time" :value="d.end" :disabled="!d.study" @change="editDay(d.weekday, 'end', $event.target.value)" :aria-label="dayNames[d.weekday] + ' to'">
             <input type="number" :value="d.maxHours" :disabled="!d.study" min="0.5" step="0.5" @change="editDay(d.weekday, 'maxHours', Number($event.target.value))" :aria-label="dayNames[d.weekday] + ' max hours'">
-            <label class="check"><input type="checkbox" :checked="d.preferred" :disabled="!d.study" @change="editDay(d.weekday, 'preferred', $event.target.checked)"> Preferred</label>
+            <select :value="d.use" :disabled="!d.study" @change="editDay(d.weekday, 'use', $event.target.value)" :aria-label="dayNames[d.weekday] + ' use'">
+              <option value="preferred">Preferred</option>
+              <option value="normal">Normal</option>
+              <option value="backup">Only if needed</option>
+            </select>
           </div>
         </div>
 
@@ -256,13 +263,7 @@ export default {
 
     const dayRows = computed(() => weekOrder.map(weekday => ({ weekday, ...dayPlan(settings, weekday) })))
 
-    // save the whole week so the older single study window turns into per day settings
-    function editDay(weekday, field, value) {
-      if ((field === 'start' || field === 'end') && !value) return
-      const days = Object.fromEntries(weekOrder.map(d => [d, { ...dayPlan(settings, d) }]))
-      days[weekday][field] = value
-      put('days', days)
-    }
+    const editDay = setDay
 
     const device = deviceZone()
     const zoneName = z => z === defaultZone ? 'UK time' : z.replace(/_/g, ' ').replace(/\//g, ', ')
