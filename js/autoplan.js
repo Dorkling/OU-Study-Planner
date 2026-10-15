@@ -1,7 +1,7 @@
 import { saveMany, remove, loadAll } from './db.js'
-import { settings } from './settings.js'
-import { planWeek, replanAuto, findClashes } from './planner.js'
-import { weekBounds } from './time.js'
+import { settings, saveSetting } from './settings.js'
+import { planWeek, replanAuto, findClashes, weekdayOwners } from './planner.js'
+import { weekBounds, dateKey } from './time.js'
 
 let running = false
 let changeTimer
@@ -18,6 +18,14 @@ async function replan(weekOf, modes) {
   if (result.unchanged) return
   await remove('blocks', result.remove)
   await saveMany('blocks', result.blocks)
+}
+
+// save each module's usual weekday, so a one-off drag doesn't change where it goes in later weeks
+export async function keepModuleDays(data) {
+  const today = dateKey(new Date(), settings.timeZone)
+  const current = data.modules.filter(m => m.end >= today).map(m => m.id)
+  const days = weekdayOwners(current, settings, data.blocks.filter(b => b.byUser))
+  if (JSON.stringify(days) !== JSON.stringify(settings.moduleDays)) await saveSetting('moduleDays', days)
 }
 
 // keep the plan in line with shifts, study hours and anything else that changes
@@ -37,6 +45,8 @@ export async function autoPlan(changed = true) {
       await remove('blocks', orphans.map(b => b.id))
       data = await loadAll()
     }
+
+    await keepModuleDays(data)
 
     // suggestions that clash or no longer fit the block length settings are out of date
     const minutes = b => (new Date(b.end) - new Date(b.start)) / 60000

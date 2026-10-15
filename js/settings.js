@@ -15,6 +15,7 @@ export const defaults = {
   solidBlocks: true,
   tmaLast: true,
   days: null,
+  moduleDays: null,
   habits: null,
   minBlock: 30,
   maxBlock: 60,

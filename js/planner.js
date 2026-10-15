@@ -125,7 +125,8 @@ export function planBlocks(free, needs, existing, settings, days = { owners: {},
   const slots = cutSlots(free, settings).sort((a, b) => a.start - b.start)
   const dayOf = slot => slot.key || dateKey(slot.start, zone)
 
-  // 0 for the module's own day while it's under its fair share, 1 for a day nobody has, 2 for another module's day
+  // 0 for the module's own day while it's under its fair share, a little more if that's a spare day it was given,
+  // 1 for a day nobody has, 2 for another module's day
   const moduleOf = need => need.module_id ?? need.assessment.module_id
   const booked = {}
   const tierOf = (slot, need) => {
@@ -133,7 +134,8 @@ export function planBlocks(free, needs, existing, settings, days = { owners: {},
     const module = moduleOf(need)
     if (!owner) return 1
     if (owner !== module) return 2
-    return (booked[module] || 0) < (days.shares[module] ?? Infinity) ? 0 : 1
+    if ((booked[module] || 0) >= (days.shares[module] ?? Infinity)) return 1
+    return days.spare?.includes(dayOf(slot)) ? 0.5 : 0
   }
 
   // hours already booked each day, and the blocks themselves for keeping a day's study together
@@ -165,7 +167,8 @@ export function planBlocks(free, needs, existing, settings, days = { owners: {},
     const limit = slot.workDay ? settings.workDayMaxHours : dayPlan(settings, weekdayOf(dayOf(slot))).maxHours
     const room = Math.floor((limit - (used[dayOf(slot)] || 0)) * 4) / 4
 
-    // never book less than the shortest block
+    // never book less than the shortest block, and don't round general study up to make one
+    if (!need.assessment && left * 60 < settings.minBlock) return 0
     const wanted = Math.max(left, settings.minBlock / 60)
     const hours = Math.min(hoursBetween(slot.start, slot.end), wanted, room)
     return hours * 60 < settings.minBlock ? 0 : hours
@@ -199,7 +202,8 @@ export function planBlocks(free, needs, existing, settings, days = { owners: {},
     blocks.push({ ...block, id: blockId(block) })
 
     used[dayOf(slot)] = (used[dayOf(slot)] || 0) + hours
-    booked[moduleOf(need)] = (booked[moduleOf(need)] || 0) + hours
+    // only this week's days count towards its fair share
+    if (days.owners[dayOf(slot)]) booked[moduleOf(need)] = (booked[moduleOf(need)] || 0) + hours
     ;(onDay[dayOf(slot)] ??= []).push({ start: new Date(slot.start), end })
 
     // keep the rest of the slot after a break
@@ -252,7 +256,8 @@ export function planBlocks(free, needs, existing, settings, days = { owners: {},
         const full = Math.min(st.left, settings.maxBlock / 60)
         const usable = slots.filter(slot => !slot.backup && hoursIn(slot, st.need, st.left))
         const isFull = slot => hoursIn(slot, st.need, st.left) >= full ? 1 : 0
-        const sameWeek = usable.filter(slot => Math.abs(slot.start - aim) <= 3.5 * 86400000)
+        const aimWeek = weekBounds(new Date(aim), zone)
+        const sameWeek = usable.filter(slot => slot.start >= aimWeek.start && slot.start < aimWeek.end)
         const crowding = (a, b) => tierOf(a, st.need) === 2 && tierOf(b, st.need) === 2 ? spareOn(dayOf(b)) - spareOn(dayOf(a)) : 0
         const ranked = sameWeek.sort((a, b) => tierOf(a, st.need) - tierOf(b, st.need) || crowding(a, b) || isFull(b) - isFull(a) || b.preferred - a.preferred || byDistance(a, b))
         const fallback = (a, b) => crowding(a, b) || byDistance(a, b)
@@ -318,10 +323,46 @@ const signature = blocks => blocks
   .sort()
   .join('|')
 
-// one module per day where possible: each module gets a day first, the neediest the biggest,
-// then any spare days go to whichever still needs the most time
+// which module each study weekday belongs to, the same every week
+// saved days come first, before any are saved the weekdays you've put a module on yourself are used,
+// and the rest go in order, preferred days first
+export function weekdayOwners(moduleIds, settings, mine = []) {
+  const zone = settings.timeZone
+  const weekdays = [1, 2, 3, 4, 5, 6, 0]
+    .filter(weekday => {
+      const plan = dayPlan(settings, weekday)
+      return plan.study !== false && plan.maxHours > 0 && plan.use !== 'backup'
+    })
+    .sort((a, b) => (dayPlan(settings, a).use === 'preferred' ? 0 : 1) - (dayPlan(settings, b).use === 'preferred' ? 0 : 1))
+
+  // hours you've placed on each weekday for each module
+  const placed = {}
+  for (const b of mine.filter(b => moduleIds.includes(b.module_id) && b.state !== 'missed')) {
+    const key = `${weekdayOf(dateKey(new Date(b.start), zone))}|${b.module_id}`
+    placed[key] = (placed[key] || 0) + hoursBetween(new Date(b.start), new Date(b.end))
+  }
+
+  const owners = {}
+  const taken = id => Object.values(owners).includes(id)
+  for (const [weekday, id] of Object.entries(settings.moduleDays || {})) {
+    if (weekdays.includes(+weekday) && moduleIds.includes(id) && !taken(id)) owners[weekday] = id
+  }
+  if (!settings.moduleDays) {
+    for (const [key] of Object.entries(placed).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
+      const [weekday, id] = key.split('|')
+      if (weekdays.includes(+weekday) && !owners[weekday] && !taken(id)) owners[weekday] = id
+    }
+  }
+  const left = moduleIds.filter(id => !taken(id))
+  for (const weekday of weekdays) {
+    if (!owners[weekday] && left.length) owners[weekday] = left.shift()
+  }
+  return owners
+}
+
+// give each study day to one module so days aren't mixed, keeping to the same weekdays each week
 // when time is short each module's claim on its own days stops at its fair share of the week
-export function assignDays(free, moduleNeeds, settings, kept = []) {
+export function assignDays(free, moduleNeeds, settings, kept = [], mine = []) {
   const zone = settings.timeZone
   const modules = moduleNeeds.filter(m => m.weekly > 0)
   if (modules.length < 2) return { owners: {}, shares: {} }
@@ -338,10 +379,15 @@ export function assignDays(free, moduleNeeds, settings, kept = []) {
     .filter(d => !d.backup)
     .map(d => ({ key: d.key, hours: Math.min(d.hours, d.limit) }))
     .filter(d => d.hours * 60 >= settings.minBlock)
-    .sort((a, b) => b.hours - a.hours || a.key.localeCompare(b.key))
+    .sort((a, b) => a.key.localeCompare(b.key))
 
   const owners = {}
-  const left = modules.map(m => ({ id: m.module_id, hours: m.weekly })).sort((a, b) => b.hours - a.hours)
+  const left = modules.map(m => ({ id: m.module_id, hours: m.weekly }))
+  const give = (day, module) => {
+    owners[day.key] = module.id
+    module.hours -= day.hours
+  }
+  const hasDay = module => Object.values(owners).includes(module.id)
 
   // a day that already has blocks someone placed stays with the module that has most time on it
   const placedOn = {}
@@ -350,27 +396,33 @@ export function assignDays(free, moduleNeeds, settings, kept = []) {
     placedOn[key] ??= {}
     placedOn[key][b.module_id] = (placedOn[key][b.module_id] || 0) + hoursBetween(new Date(b.start), new Date(b.end))
   }
-  const open = biggest.filter(day => {
+  let open = biggest.filter(day => {
     const [id] = Object.entries(placedOn[day.key] || {}).sort((a, b) => b[1] - a[1])[0] || []
     const module = left.find(m => m.id === id)
-    if (!module) return true
-    owners[day.key] = module.id
-    module.hours -= day.hours
-    return false
+    if (module) give(day, module)
+    return !module
   })
 
-  // the rest go to whoever needs most, one day each before anyone gets a second
-  const unowned = left.filter(m => !Object.values(owners).includes(m.id))
-  open.forEach((day, i) => {
-    const module = i < unowned.length ? unowned[i] : [...left].sort((a, b) => b.hours - a.hours)[0]
-    owners[day.key] = module.id
-    module.hours -= day.hours
+  // then each module's usual weekday, unless it already has a day this week
+  const usual = weekdayOwners(moduleNeeds.map(m => m.module_id), settings, mine)
+  open = open.filter(day => {
+    const module = left.find(m => m.id === usual[weekdayOf(day.key)])
+    if (module && !hasDay(module)) give(day, module)
+    return !owners[day.key]
   })
+
+  // a module that lost its day gets a spare one, then spare days go to whoever needs most
+  const spare = []
+  for (const day of open) {
+    const module = left.find(m => !hasDay(m))
+    if (!module) spare.push(day.key)
+    give(day, module || [...left].sort((a, b) => b.hours - a.hours)[0])
+  }
 
   const capacity = biggest.reduce((sum, d) => sum + d.hours, 0)
   const need = modules.reduce((sum, m) => sum + m.weekly, 0)
   const shares = Object.fromEntries(modules.map(m => [m.module_id, need > capacity ? capacity * m.weekly / need : m.weekly]))
-  return { owners, shares }
+  return { owners, shares, spare }
 }
 
 // each module's next assessment still to do, as of a date, so later ones wait their turn
@@ -389,6 +441,84 @@ export function queuedWork(assessments, settings, from, until) {
     finished[a.module_id] = shiftDays(new Date(a.due), -settings.tmaBuffer, settings.timeZone)
   }
   return ready
+}
+
+// lay each day's new blocks out back to back from its first free time, study before tma work,
+// so a day is one solid session that only breaks for things like tutorials
+// a day is left as it was if its blocks won't all fit or would miss a finish by date
+export function packDays(blocks, free, settings, limits = {}) {
+  const zone = settings.timeZone
+  const gap = settings.breakMins * 60000
+  const sameWork = (a, b) => a.module_id === b.module_id && a.assessment_id === b.assessment_id && a.task_id === b.task_id
+  const days = {}
+  for (const b of blocks) (days[dateKey(new Date(b.start), zone)] ??= []).push(b)
+
+  return Object.entries(days).flatMap(([key, dayBlocks]) => {
+    const open = free.filter(f => dateKey(f.start, zone) === key).sort((a, b) => a.start - b.start)
+    const sorted = [...dayBlocks].sort((a, b) => a.start.localeCompare(b.start))
+    const ordered = settings.tmaLast === false ? sorted : [...sorted.filter(b => !b.assessment_id), ...sorted.filter(b => b.assessment_id)]
+
+    // the same work back to back counts as one run
+    const runs = []
+    for (const b of ordered) {
+      const run = runs.at(-1)
+      const minutes = (new Date(b.end) - new Date(b.start)) / 60000
+      if (run && sameWork(run.block, b)) run.minutes += minutes
+      else runs.push({ block: b, minutes })
+    }
+
+    // pour the runs into the free time, cutting at the longest block and never leaving a scrap
+    const out = []
+    let i = 0
+    let at = open[0] && +open[0].start
+    for (const run of runs) {
+      let left = run.minutes
+      while (left > 0 && i < open.length) {
+        const room = (open[i].end - at) / 60000
+        let piece = Math.min(left, settings.maxBlock, room)
+        if (left - piece > 0 && left - piece < settings.minBlock) piece = left - settings.minBlock
+        if (piece < settings.minBlock || piece <= 0) {
+          i++
+          at = open[i] && +open[i].start
+          continue
+        }
+        const { id, ...content } = { ...run.block, start: new Date(at).toISOString(), end: new Date(at + piece * 60000).toISOString() }
+        out.push({ ...content, id: blockId(content) })
+        left -= piece
+        at += piece * 60000 + gap
+        if (at >= open[i].end) {
+          i++
+          at = open[i] && +open[i].start
+        }
+      }
+      if (left > 0) return dayBlocks
+    }
+
+    const fits = out.every(b => {
+      const limit = limits[b.assessment_id]
+      return !limit || ((!limit.notBefore || new Date(b.start) >= limit.notBefore) && new Date(b.end) <= limit.target)
+    })
+    return fits ? out : dayBlocks
+  })
+}
+
+// a block dropped against or over another of the same work becomes one with it, however long that makes it
+export function joinDropped(block, blocks) {
+  const done = b => b.state === 'done'
+  const same = b => b.id !== block.id && b.module_id === block.module_id && b.assessment_id === block.assessment_id &&
+    done(b) === done(block) && b.state !== 'missed' && !b.deleted
+  let joined = block
+  const gone = []
+  let next
+  while ((next = blocks.find(b => same(b) && !gone.includes(b.id) && b.start <= joined.end && b.end >= joined.start))) {
+    gone.push(next.id)
+    joined = {
+      ...joined,
+      start: next.start < joined.start ? next.start : joined.start,
+      end: next.end > joined.end ? next.end : joined.end
+    }
+  }
+  return { block: joined, remove: gone }
 }
 
 // blocks of the same work with no gap between them become one, up to the longest block
@@ -482,7 +612,7 @@ export function planWeek(data, settings, now, weekOf, modes = ['auto', 'suggest'
     .map(n => ({ ...n, notBefore: startsFrom[n.assessment.id] }))
   const until = new Date(Math.max(week.end, ...needs.map(n => +n.target)))
   const free = getFreeTime(from, until, { ...data, blocks: kept, now }, settings)
-  const owners = settings.groupByDay === false ? undefined : assignDays(getFreeTime(from, week.end, { ...data, blocks: kept, now }, settings), getModuleNeeds(data, settings, week, kept), settings, kept.filter(inWeek))
+  const owners = settings.groupByDay === false ? undefined : assignDays(getFreeTime(from, week.end, { ...data, blocks: kept, now }, settings), getModuleNeeds(data, settings, week, kept), settings, kept.filter(inWeek), data.blocks.filter(b => b.byUser))
   const first = planBlocks(free, needs, kept, settings, owners)
   let placed = first.blocks.filter(b => new Date(b.start) < week.end)
 
@@ -496,7 +626,11 @@ export function planWeek(data, settings, now, weekOf, modes = ['auto', 'suggest'
     .map(n => ({ ...n, notBefore: startsFrom[n.assessment.id] })))
   if (settings.trackOptional) after(booked => getModuleNeeds(data, settings, week, booked).filter(n => planning.includes(n.module_id)))
 
-  const blocks = joinTouching(studyFirst(placed, settings), settings).map(b => {
+  // each day from tomorrow as one solid session, today is left alone so it doesn't move as the hours pass
+  const limits = Object.fromEntries(needs.filter(n => n.assessment).map(n => [n.assessment.id, n]))
+  const tomorrow = new Date(Math.max(from, startOfDay(addDaysToKey(dateKey(now, settings.timeZone), 1), settings.timeZone)))
+  const packed = packDays(studyFirst(placed, settings), getFreeTime(tomorrow, week.end, { ...data, blocks: kept, now }, settings), settings, limits)
+  const blocks = joinTouching(packed, settings).map(b => {
     const auto = modeOf(b.module_id) === 'auto'
     return { ...b, state: auto ? 'accepted' : 'suggested', auto }
   })

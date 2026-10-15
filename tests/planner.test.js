@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto, assignDays, queuedWork, studyFirst, joinTouching } from '../js/planner.js'
+import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto, assignDays, queuedWork, studyFirst, joinTouching, joinDropped, packDays, weekdayOwners } from '../js/planner.js'
 
 import { zonedTime } from '../js/time.js'
 import { dayPlan } from '../js/freetime.js'
@@ -668,4 +668,72 @@ test('an auto plan stays put as the hours go by during the day', () => {
   for (const hour of [10, 13, 16]) {
     assert.equal(replanAuto({ ...data, blocks: morning }, settingsSpread, at(12, hour)).unchanged, true, `still the same at ${hour}:00`)
   }
+})
+
+test('each module keeps the same weekday every week', () => {
+  const data = { ...emptyWeek, modules: modulesOn(30, 30, 30) }
+  const settingsSpread = { ...planSettings, planStyle: 'spread', days: fourDays }
+  const weekdaysOf = blocks => {
+    const days = {}
+    for (const b of blocks) (days[new Date(b.start).getUTCDay()] ??= new Set()).add(b.module_id)
+    return Object.fromEntries(Object.entries(days).map(([d, s]) => [d, [...s].sort().join()]))
+  }
+  const blocks = planWeeks(data, settingsSpread, at(12, 8), at(12, 8), 3).blocks
+  const weeks = [12, 19, 26].map(d => weekdaysOf(blocks.filter(b => new Date(b.start) >= at(d, 0) && new Date(b.start) < at(d + 7, 0))))
+  assert.deepEqual(weeks[1], weeks[0])
+  assert.deepEqual(weeks[2], weeks[0])
+})
+
+test('a weekday you keep putting a module on becomes its usual day', () => {
+  const mine = [{ module_id: 'B', state: 'accepted', start: at(12, 9).toISOString(), end: at(12, 12).toISOString() }]
+  const owners = weekdayOwners(['A', 'B'], { ...planSettings, days: fourDays }, mine)
+  assert.equal(owners[1], 'B')
+  assert.ok(Object.values(owners).includes('A'))
+})
+
+test('a day is packed into one run from its first free time, study before tma work', () => {
+  const free = [{ start: at(13, 9), end: at(13, 12) }, { start: at(13, 13), end: at(13, 18) }]
+  const blocks = [
+    { module_id: 'm1', assessment_id: 't', task_id: null, start: at(13, 15).toISOString(), end: at(13, 17).toISOString() },
+    { module_id: 'm1', assessment_id: null, task_id: null, start: at(13, 10).toISOString(), end: at(13, 11).toISOString() }
+  ]
+  const packed = packDays(blocks, free, { ...planSettings, maxBlock: 240, minBlock: 60, breakMins: 0 })
+  assert.deepEqual(packed.map(b => [new Date(b.start).getUTCHours(), hours(b), b.assessment_id]), [[8, 1, null], [9, 2, 't']])
+})
+
+test('a day is left alone if packing would push tma work past its finish by date', () => {
+  const free = [{ start: at(13, 9), end: at(13, 18) }]
+  const blocks = [
+    { module_id: 'm1', assessment_id: 't', task_id: null, start: at(13, 9).toISOString(), end: at(13, 11).toISOString() },
+    { module_id: 'm1', assessment_id: null, task_id: null, start: at(13, 11).toISOString(), end: at(13, 13).toISOString() }
+  ]
+  const packed = packDays(blocks, free, { ...planSettings, maxBlock: 240, minBlock: 60, breakMins: 0 }, { t: { target: at(13, 11) } })
+  assert.deepEqual(packed, blocks)
+})
+
+test('dragging a block against the same work joins them past the longest block', () => {
+  const block = (id, from, to, extra = {}) => ({ id, module_id: 'm1', assessment_id: 't', state: 'accepted', start: at(13, from).toISOString(), end: at(13, to).toISOString(), ...extra })
+  const others = [block('a', 9, 13), block('b', 13, 17), block('c', 17, 18, { assessment_id: null }), block('d', 18, 19, { state: 'done' })]
+  const { block: joined, remove } = joinDropped(block('x', 13, 17), others.filter(b => b.id !== 'b'))
+  assert.equal(joined.id, 'x')
+  assert.equal(hours(joined), 8)
+  assert.deepEqual(remove, ['a'])
+  assert.deepEqual(joinDropped(block('x', 20, 21), others).remove, [])
+})
+
+test('saved usual days win over one-off drags', () => {
+  const mine = [{ module_id: 'B', state: 'accepted', start: at(12, 9).toISOString(), end: at(12, 17).toISOString() }]
+  const owners = weekdayOwners(['A', 'B'], { ...planSettings, days: fourDays, moduleDays: { 1: 'A', 3: 'B' } }, mine)
+  assert.equal(owners[1], 'A')
+  assert.equal(owners[3], 'B')
+})
+
+test('a one-off drag to another day leaves the following weeks as they were', () => {
+  const data = { ...emptyWeek, modules: modulesOn(30, 30) }
+  const daySettings = { ...planSettings, planStyle: 'spread', days: fourDays, moduleDays: { 1: 'M0', 3: 'M1' } }
+  const usual = planWeeks(data, daySettings, at(12, 8), at(12, 8), 2).blocks
+  const moved = { module_id: 'M0', assessment_id: null, task_id: null, state: 'accepted', byUser: true, start: at(14, 9).toISOString(), end: at(14, 11).toISOString() }
+  const after = planWeeks({ ...data, blocks: [moved] }, daySettings, at(12, 8), at(12, 8), 2).blocks
+  const nextWeek = blocks => blocks.filter(b => new Date(b.start) >= at(19, 0)).map(b => b.id).sort()
+  assert.deepEqual(nextWeek(after), nextWeek(usual))
 })

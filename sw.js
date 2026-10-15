@@ -1,5 +1,5 @@
 // bump when files change, people are asked before a new version takes over
-const version = 'v22'
+const version = 'v23'
 
 // the screenshot reader is big and rarely changes, so it keeps its own cache between versions
 const ocrCache = 'tesseract-5.1.1'

@@ -1,11 +1,12 @@
 import { save, saveMany, remove, live, loadAll } from '../db.js'
 import { settings, saveSetting } from '../settings.js'
+import { keepModuleDays } from '../autoplan.js'
 import { getShifts, getBlocked, getFreeTime, getBusy, dayPlan } from '../freetime.js'
-import { getNeeds, moduleWeekSummary, planWeeks, weeksToEnd, checkRisks, findClashes } from '../planner.js'
+import { getNeeds, moduleWeekSummary, planWeeks, weeksToEnd, checkRisks, findClashes, joinDropped } from '../planner.js'
 import CapacityNote from '../components/capacity-note.js'
 import { moveClashes, markSubmitted } from '../progress.js'
 import { recordMove, habitSuggestion, acceptHabit, dismissHabit } from '../habits.js'
-import { dateKey, clockTime, shortDate, weekBounds, toWall, fromWall, dayNames } from '../time.js'
+import { dateKey, clockTime, shortDate, weekBounds, toWall, fromWall, dayNames, weekdayOf } from '../time.js'
 import { oneDecimal } from '../estimates.js'
 import { calendarEvents, buildCalendar } from '../ics.js'
 import { downloadFile } from '../backup.js'
@@ -49,7 +50,15 @@ export default {
 
       <CapacityNote />
 
-      <div v-if="habit" class="notice">
+      <div v-if="dayChange" class="notice">
+        <p>You moved {{ codeOf(dayChange.module_id) }} from {{ dayNames[dayChange.from] }} to {{ dayNames[dayChange.to] }}. Keep {{ codeOf(dayChange.module_id) }} on {{ dayNames[dayChange.to] }}s from now on?</p>
+        <div class="actions">
+          <button class="primary" @click="moveModuleDay">Every week</button>
+          <button @click="dayChange = null">Just this week</button>
+        </div>
+      </div>
+
+      <div v-else-if="habit" class="notice">
         <p v-if="habit.use === 'backup'">You've moved study off {{ dayNames[habit.weekday] }}s a few times. Only use {{ dayNames[habit.weekday] }}s when needed from now on?</p>
         <p v-else>You've moved study onto {{ dayNames[habit.weekday] }}s a few times. Make {{ dayNames[habit.weekday] }} a preferred day?</p>
         <div class="actions">
@@ -260,6 +269,7 @@ export default {
 
       // let the button show planning before the work starts
       await new Promise(resolve => setTimeout(resolve, 20))
+      await keepModuleDays(d)
       const result = planWeeks(d, settings, new Date(), weekOf(), weeks)
       await remove('blocks', result.remove)
       await saveMany('blocks', result.blocks)
@@ -327,13 +337,39 @@ export default {
     // spot a pattern in where blocks get dragged, see habits.js
     const habit = computed(() => data.value && settings.habits ? habitSuggestion() : null)
 
-    // moving a block accepts it
-    function moved(info) {
+    // a module's study moved to another weekday, asking if that's for good
+    const dayChange = ref(null)
+    const codeOf = id => modules.value.find(m => m.id === id)?.code || 'Module'
+    const weekdayIn = date => weekdayOf(dateKey(date, zone()))
+
+    // the module takes the new weekday, and whatever had it swaps onto the old one
+    async function moveModuleDay() {
+      const { module_id, from, to } = dayChange.value
+      const days = { ...settings.moduleDays }
+      const other = days[to]
+      days[to] = module_id
+      if (other) days[from] = other
+      else delete days[from]
+      dayChange.value = null
+      await saveSetting('moduleDays', days)
+    }
+
+    // moving a block accepts it, and dropping it against the same work joins them
+    async function moved(info) {
       const block = info.event.extendedProps.block
       if (info.oldEvent) recordMove(new Date(block.start), fromWall(info.event.start, zone()))
       const start = fromWall(info.event.start, zone())
       const end = fromWall(info.event.end, zone())
-      save('blocks', { ...block, start: start.toISOString(), end: end.toISOString(), state: block.state === 'done' ? 'done' : 'accepted', auto: false, byUser: true })
+      const from = weekdayIn(new Date(block.start))
+      const to = weekdayIn(start)
+      const studyDay = dayPlan(settings, to).study !== false && dayPlan(settings, to).use !== 'backup'
+      if (info.oldEvent && studyDay && from !== to && settings.moduleDays?.[from] === block.module_id && settings.moduleDays[to] !== block.module_id) {
+        dayChange.value = { module_id: block.module_id, from, to }
+      }
+      const placed = { ...block, start: start.toISOString(), end: end.toISOString(), state: block.state === 'done' ? 'done' : 'accepted', auto: false, byUser: true }
+      const joined = joinDropped(placed, data.value.blocks)
+      if (joined.remove.length) await remove('blocks', joined.remove)
+      await save('blocks', joined.block)
     }
 
     onMounted(() => {
@@ -403,7 +439,7 @@ export default {
     })
 
     return {
-      el, message, viewType, markSubmitted, habit, acceptHabit, dismissHabit, dayNames, planning, settings, saveSetting, atRisk, clashes, clashOf, moveAll, selected, picked, pickedFor, needs, modules, moduleWeek, canPlan, suggestedCount,
+      el, message, viewType, markSubmitted, habit, acceptHabit, dismissHabit, dayChange, moveModuleDay, codeOf, dayNames, planning, settings, saveSetting, atRisk, clashes, clashOf, moveAll, selected, picked, pickedFor, needs, modules, moduleWeek, canPlan, suggestedCount,
       code, label, partTitle, dayText, whenText, oneDecimal, plan, exportCalendar, accept, acceptAll, dismiss, clearPick, addBlock
     }
   }
