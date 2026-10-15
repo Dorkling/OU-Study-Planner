@@ -1,5 +1,5 @@
 // bump when files change, people are asked before a new version takes over
-const version = 'v23'
+const version = 'v24'
 
 // the screenshot reader is big and rarely changes, so it keeps its own cache between versions
 const ocrCache = 'tesseract-5.1.1'
@@ -70,17 +70,16 @@ self.addEventListener('message', event => {
 
 // delete old versions, keep the screenshot reader
 self.addEventListener('activate', event => {
-  event.waitUntil(caches.keys().then(keys =>
-    Promise.all(keys.filter(key => key !== version && key !== ocrCache).map(key => caches.delete(key)))
-  ))
-  self.clients.claim()
+  event.waitUntil(caches.keys()
+    .then(keys => Promise.all(keys.filter(key => key !== version && key !== ocrCache).map(key => caches.delete(key))))
+    .then(() => self.clients.claim()))
 })
 
 async function fromNetwork(request, cacheName) {
   const response = await fetch(request.url, { cache: 'no-cache' })
   if (response.ok) {
     const copy = response.clone()
-    caches.open(cacheName).then(cache => cache.put(request, copy))
+    await caches.open(cacheName).then(cache => cache.put(request, copy))
   }
   return response
 }

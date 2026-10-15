@@ -89,7 +89,8 @@ async function turnOn() {
 
 // replace this device with what's in drive, then carry on syncing as normal
 export async function useDriveCopy() {
-  const remote = await driveClient(savedToken()).read()
+  const token = savedToken() || await signIn()
+  const remote = await driveClient(token).read()
   if (remote) await copyOnto(unpack(remote.text))
   await turnOn()
 }

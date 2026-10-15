@@ -344,10 +344,11 @@ export function weekdayOwners(moduleIds, settings, mine = []) {
 
   const owners = {}
   const taken = id => Object.values(owners).includes(id)
-  for (const [weekday, id] of Object.entries(settings.moduleDays || {})) {
+  const saved = Object.entries(settings.moduleDays || {})
+  for (const [weekday, id] of saved) {
     if (weekdays.includes(+weekday) && moduleIds.includes(id) && !taken(id)) owners[weekday] = id
   }
-  if (!settings.moduleDays) {
+  if (!saved.length) {
     for (const [key] of Object.entries(placed).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
       const [weekday, id] = key.split('|')
       if (weekdays.includes(+weekday) && !owners[weekday] && !taken(id)) owners[weekday] = id
@@ -443,6 +444,14 @@ export function queuedWork(assessments, settings, from, until) {
   return ready
 }
 
+// true if no assessment block starts before its turn or ends after its finish by date
+function keepsLimits(blocks, limits) {
+  return blocks.every(b => {
+    const limit = limits[b.assessment_id]
+    return !limit || ((!limit.notBefore || new Date(b.start) >= limit.notBefore) && new Date(b.end) <= limit.target)
+  })
+}
+
 // lay each day's new blocks out back to back from its first free time, study before tma work,
 // so a day is one solid session that only breaks for things like tutorials
 // a day is left as it was if its blocks won't all fit or would miss a finish by date
@@ -494,11 +503,7 @@ export function packDays(blocks, free, settings, limits = {}) {
       if (left > 0) return dayBlocks
     }
 
-    const fits = out.every(b => {
-      const limit = limits[b.assessment_id]
-      return !limit || ((!limit.notBefore || new Date(b.start) >= limit.notBefore) && new Date(b.end) <= limit.target)
-    })
-    return fits ? out : dayBlocks
+    return keepsLimits(out, limits) ? out : dayBlocks
   })
 }
 
@@ -541,7 +546,8 @@ export function joinTouching(blocks, settings) {
 
 // in each run of back to back blocks, study goes first and tma work after, so you read then write
 // lengths stay the same and the run never gets longer, so nothing moves onto other plans
-export function studyFirst(blocks, settings) {
+// a run is left as it was if tma work would end up past its finish by date
+export function studyFirst(blocks, settings, limits = {}) {
   if (settings.tmaLast === false) return blocks
   const zone = settings.timeZone
   const gap = settings.breakMins * 60000
@@ -567,13 +573,14 @@ export function studyFirst(blocks, settings) {
       }
 
       let at = +new Date(run[0].start)
-      for (const b of [...run.filter(b => !b.assessment_id), ...run.filter(b => b.assessment_id)]) {
+      const reordered = [...run.filter(b => !b.assessment_id), ...run.filter(b => b.assessment_id)].map(b => {
         const length = new Date(b.end) - new Date(b.start)
         const moved = { ...b, start: new Date(at).toISOString(), end: new Date(at + length).toISOString() }
         const { id, ...content } = moved
-        out.push({ ...moved, id: blockId(content) })
         at += length + gap
-      }
+        return { ...moved, id: blockId(content) }
+      })
+      out.push(...(keepsLimits(reordered, limits) ? reordered : run))
     }
   }
   return out.sort((a, b) => a.start.localeCompare(b.start))
@@ -629,7 +636,7 @@ export function planWeek(data, settings, now, weekOf, modes = ['auto', 'suggest'
   // each day from tomorrow as one solid session, today is left alone so it doesn't move as the hours pass
   const limits = Object.fromEntries(needs.filter(n => n.assessment).map(n => [n.assessment.id, n]))
   const tomorrow = new Date(Math.max(from, startOfDay(addDaysToKey(dateKey(now, settings.timeZone), 1), settings.timeZone)))
-  const packed = packDays(studyFirst(placed, settings), getFreeTime(tomorrow, week.end, { ...data, blocks: kept, now }, settings), settings, limits)
+  const packed = packDays(studyFirst(placed, settings, limits), getFreeTime(tomorrow, week.end, { ...data, blocks: kept, now }, settings), settings, limits)
   const blocks = joinTouching(packed, settings).map(b => {
     const auto = modeOf(b.module_id) === 'auto'
     return { ...b, state: auto ? 'accepted' : 'suggested', auto }
@@ -649,7 +656,13 @@ export function planWeek(data, settings, now, weekOf, modes = ['auto', 'suggest'
 export function checkRisks(data, settings, now) {
   const kept = data.blocks.filter(b => b.state !== 'suggested')
   const weekly = settings.revisionMode === 'weekly'
-  const needs = getNeeds({ ...data, assessments: data.assessments.filter(a => !(weekly && isRevision(a))), blocks: kept }, settings, now)
+
+  // each assessment waits its turn, the same as when planning
+  const queue = settings.oneAtATime === false ? data.assessments.map(assessment => ({ assessment })) : queuedWork(data.assessments, settings, now, new Date(8.64e15))
+  const startsFrom = Object.fromEntries(queue.map(q => [q.assessment.id, q.notBefore]))
+  const assessments = queue.map(q => q.assessment).filter(a => !(weekly && isRevision(a)))
+  const needs = getNeeds({ ...data, assessments, blocks: kept }, settings, now)
+    .map(n => ({ ...n, notBefore: startsFrom[n.assessment.id] }))
   if (!needs.some(n => n.remaining > 0)) return []
 
   const until = new Date(Math.max(...needs.map(n => +n.target)))

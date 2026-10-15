@@ -25,6 +25,7 @@ export async function keepModuleDays(data) {
   const today = dateKey(new Date(), settings.timeZone)
   const current = data.modules.filter(m => m.end >= today).map(m => m.id)
   const days = weekdayOwners(current, settings, data.blocks.filter(b => b.byUser))
+  if (!Object.keys(days).length) return
   if (JSON.stringify(days) !== JSON.stringify(settings.moduleDays)) await saveSetting('moduleDays', days)
 }
 

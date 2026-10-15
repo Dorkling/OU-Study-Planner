@@ -737,3 +737,26 @@ test('a one-off drag to another day leaves the following weeks as they were', ()
   const nextWeek = blocks => blocks.filter(b => new Date(b.start) >= at(19, 0)).map(b => b.id).sort()
   assert.deepEqual(nextWeek(after), nextWeek(usual))
 })
+
+test('an empty set of saved days still learns from where you drag things', () => {
+  const mine = [{ module_id: 'B', state: 'accepted', start: at(12, 9).toISOString(), end: at(12, 12).toISOString() }]
+  const owners = weekdayOwners(['A', 'B'], { ...planSettings, days: fourDays, moduleDays: {} }, mine)
+  assert.equal(owners[1], 'B')
+})
+
+test('study first leaves a run alone if tma work would end past its finish by date', () => {
+  const run = [
+    { module_id: 'm1', assessment_id: 't', task_id: null, start: at(13, 9).toISOString(), end: at(13, 11).toISOString() },
+    { module_id: 'm1', assessment_id: null, task_id: null, start: at(13, 11).toISOString(), end: at(13, 13).toISOString() }
+  ]
+  const tight = studyFirst(run, planSettings, { t: { target: at(13, 11) } })
+  assert.deepEqual(tight.map(b => b.start), run.map(b => b.start))
+  assert.equal(studyFirst(run, planSettings, { t: { target: at(13, 14) } })[0].assessment_id, null)
+})
+
+test('the risk check waits for the previous assessment like the planner does', () => {
+  const data = { ...emptyWeek, assessments: [{ ...tma('t1', 19), type: 'tma' }, { ...tma('t2', 19), type: 'tma', due: at(19, 13).toISOString() }] }
+  const tight = { ...planSettings, hoursPerTma: 4 }
+  assert.deepEqual(checkRisks(data, tight, at(12, 8)).map(r => r.assessment.id), ['t2'])
+  assert.deepEqual(checkRisks(data, { ...tight, oneAtATime: false }, at(12, 8)), [])
+})

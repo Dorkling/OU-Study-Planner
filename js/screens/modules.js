@@ -1,7 +1,7 @@
 import { all, save, remove, live } from '../db.js'
 import { weeklyHours, oneDecimal } from '../estimates.js'
 import { settings } from '../settings.js'
-import { shortDate, dateAndTime } from '../time.js'
+import { shortDate, dateAndTime, dateKey, addDaysToKey, startOfDay } from '../time.js'
 import { packModule, unpackModule, mergeModule } from '../share.js'
 import { downloadFile } from '../backup.js'
 import { markSubmitted, startCatchUp, stopCatchUp, deleteModule as deleteModuleAndReplan } from '../progress.js'
@@ -110,7 +110,8 @@ export default {
       const upcoming = assessmentsFor(m.id)
         .filter(a => !a.submitted && new Date(a.due) > now)
         .map(a => ({ value: a.due, label: `${a.title} (${shortDate(a.due, settings.timeZone)})`, keep: `${a.title} (${shortDate(a.due, settings.timeZone)})` }))
-      const fourWeeks = new Date(+now + 28 * 86400000).toISOString()
+      // the start of a day, so it's the same each time the list is made
+      const fourWeeks = startOfDay(addDaysToKey(dateKey(now, settings.timeZone), 28), settings.timeZone).toISOString()
       return [...upcoming, { value: fourWeeks, label: `4 weeks from now (${shortDate(fourWeeks, settings.timeZone)})`, keep: shortDate(fourWeeks, settings.timeZone) }]
     }
 
