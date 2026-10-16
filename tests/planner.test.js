@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto, assignDays, queuedWork, studyFirst, joinTouching, joinDropped, packDays, weekdayOwners } from '../js/planner.js'
+import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto, assignDays, queuedWork, studyFirst, joinTouching, joinDropped, packDays, weekdayOwners, overdueWork } from '../js/planner.js'
 
 import { zonedTime } from '../js/time.js'
 import { dayPlan } from '../js/freetime.js'
@@ -759,4 +759,20 @@ test('the risk check waits for the previous assessment like the planner does', (
   const tight = { ...planSettings, hoursPerTma: 4 }
   assert.deepEqual(checkRisks(data, tight, at(12, 8)).map(r => r.assessment.id), ['t2'])
   assert.deepEqual(checkRisks(data, { ...tight, oneAtATime: false }, at(12, 8)), [])
+})
+
+test('days are left as they are when solid blocks is off', () => {
+  const free = [{ start: at(13, 9), end: at(13, 18) }]
+  const blocks = [
+    { module_id: 'm1', assessment_id: null, task_id: null, start: at(13, 10).toISOString(), end: at(13, 11).toISOString() },
+    { module_id: 'm1', assessment_id: null, task_id: null, start: at(13, 15).toISOString(), end: at(13, 16).toISOString() }
+  ]
+  assert.deepEqual(packDays(blocks, free, { ...planSettings, solidBlocks: false }), blocks)
+  assert.notDeepEqual(packDays(blocks, free, planSettings), blocks)
+})
+
+test('unsubmitted work past its due date is listed as overdue, earliest first', () => {
+  const list = [{ ...tma('late', 10), type: 'tma' }, { ...tma('later', 11), type: 'tma' }, { ...tma('done', 9), type: 'tma', submitted: true }, { ...tma('soon', 14), type: 'tma' }]
+  assert.deepEqual(overdueWork(list, at(12, 8)).map(a => a.id), ['late', 'later'])
+  assert.equal(getNeeds({ ...emptyWeek, assessments: list }, planSettings, at(12, 8)).length, 1)
 })

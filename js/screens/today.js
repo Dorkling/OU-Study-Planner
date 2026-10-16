@@ -1,6 +1,6 @@
 import { live, loadAll, save } from '../db.js'
 import { settings } from '../settings.js'
-import { getNeeds, moduleWeekSummary, checkRisks, findClashes } from '../planner.js'
+import { getNeeds, moduleWeekSummary, checkRisks, findClashes, overdueWork } from '../planner.js'
 import CapacityNote from '../components/capacity-note.js'
 import { shortDate, clockTime, dateKey, weekBounds, hoursBetween } from '../time.js'
 import { oneDecimal } from '../estimates.js'
@@ -23,12 +23,17 @@ export default {
         <div class="actions"><button @click="moveAll">Move {{ clashes.length === 1 ? 'it' : 'them' }}</button></div>
       </div>
 
+      <div v-if="overdue.length" class="notice warn">
+        <p v-for="a in overdue">{{ label(a.module_id, a.id) }} was due {{ dayText(a.due) }} and isn't ticked off. <button class="link" @click="markSubmitted(a, true)">{{ a.type === 'exam' ? 'Done' : 'Submitted' }}</button></p>
+      </div>
+
       <div v-if="risks.length" class="notice warn">
         <p v-for="r in risks">{{ label(r.assessment.module_id, r.assessment.id) }} is at risk: about {{ r.hours }} h won't fit before {{ dayText(r.target) }}.</p>
       </div>
 
       <div v-if="checkIns.length || tutorialCheckIns.length" class="card">
         <h2>How did it go?</h2>
+        <p v-if="checkIns.length > 1" class="hint">Blocks from the last few days. <button class="link" @click="allDone">They all went to plan</button></p>
         <div v-for="b in checkIns" :key="b.id" class="check-in">
           <div class="grow">
             <strong>{{ label(b.module_id, b.assessment_id) }}</strong>
@@ -121,12 +126,12 @@ export default {
     const dayText = date => shortDate(date, zone())
     const whenText = item => `${shortDate(item.start, zone())}, ${clockTime(new Date(item.start), zone())} to ${clockTime(new Date(item.end), zone())}`
 
-    // finished in the last 2 weeks
-    const recent = item => new Date(item.end) < new Date() && new Date(item.end) > new Date(Date.now() - 14 * day)
+    // study from the last 3 days, older blocks count as done without asking, tutorials wait longer
+    const recent = (item, days = 3) => new Date(item.end) < new Date() && new Date(item.end) > new Date(Date.now() - days * day)
     const checkIns = computed(() => data.value.blocks
       .filter(b => b.state === 'accepted' && recent(b))
       .sort((a, b) => a.start.localeCompare(b.start)))
-    const tutorialCheckIns = computed(() => data.value.tutorials.filter(t => t.attended == null && recent(t)))
+    const tutorialCheckIns = computed(() => data.value.tutorials.filter(t => t.attended == null && recent(t, 14)))
 
     // use the block length if left blank
     const blockLength = b => hoursBetween(new Date(b.start), new Date(b.end))
@@ -144,6 +149,11 @@ export default {
       replanned.value = true
     }
 
+    // every waiting block done for its full length
+    async function allDone() {
+      for (const b of checkIns.value) await markDone(b, hoursFor(b))
+    }
+
     // today and tomorrow in the user's zone
     const upcoming = computed(() => {
       const now = new Date()
@@ -156,6 +166,7 @@ export default {
     })
 
     const risks = computed(() => checkRisks(data.value, settings, new Date()))
+    const overdue = computed(() => overdueWork(data.value.assessments, new Date()))
 
     // suggestions tidy themselves, accepted blocks need a nudge
     const clashes = computed(() => findClashes(data.value, settings, new Date()).filter(c => c.block.state === 'accepted'))
@@ -174,7 +185,7 @@ export default {
       : [])
 
     return {
-      data, spent, replanned, risks, clashes, moveAll, checkIns, tutorialCheckIns, upcoming, dueSoon, todos, moduleWeek,
+      data, spent, replanned, risks, overdue, clashes, moveAll, checkIns, tutorialCheckIns, allDone, upcoming, dueSoon, todos, moduleWeek,
       code, label, dayText, whenText, oneDecimal, blockLength, atRisk, done, missed, finishTodo, markAttended, markMissedTutorial, markSubmitted
     }
   }

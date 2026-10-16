@@ -1,5 +1,5 @@
 // bump when files change, people are asked before a new version takes over
-const version = 'v24'
+const version = 'v25'
 
 // the screenshot reader is big and rarely changes, so it keeps its own cache between versions
 const ocrCache = 'tesseract-5.1.1'
@@ -79,7 +79,7 @@ async function fromNetwork(request, cacheName) {
   const response = await fetch(request.url, { cache: 'no-cache' })
   if (response.ok) {
     const copy = response.clone()
-    await caches.open(cacheName).then(cache => cache.put(request, copy))
+    await caches.open(cacheName).then(cache => cache.put(request, copy)).catch(() => {})
   }
   return response
 }

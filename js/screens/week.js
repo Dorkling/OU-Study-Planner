@@ -2,7 +2,7 @@ import { save, saveMany, remove, live, loadAll } from '../db.js'
 import { settings, saveSetting } from '../settings.js'
 import { keepModuleDays } from '../autoplan.js'
 import { getShifts, getBlocked, getFreeTime, getBusy, dayPlan } from '../freetime.js'
-import { getNeeds, moduleWeekSummary, planWeeks, weeksToEnd, checkRisks, findClashes, joinDropped } from '../planner.js'
+import { getNeeds, moduleWeekSummary, planWeeks, weeksToEnd, checkRisks, findClashes, joinDropped, overdueWork } from '../planner.js'
 import CapacityNote from '../components/capacity-note.js'
 import { moveClashes, markSubmitted } from '../progress.js'
 import { recordMove, habitSuggestion, acceptHabit, dismissHabit } from '../habits.js'
@@ -70,6 +70,10 @@ export default {
       <div v-if="clashes.length" class="notice warn">
         <p>{{ clashes.length }} study {{ clashes.length === 1 ? 'block clashes' : 'blocks clash' }} with your work, blocked time or study hours. They're marked in red.</p>
         <div class="actions"><button @click="moveAll">Move {{ clashes.length === 1 ? 'it' : 'them' }}</button></div>
+      </div>
+
+      <div v-if="overdue.length" class="notice warn">
+        <p v-for="a in overdue">{{ label(a.module_id, a.id) }} was due {{ dayText(a.due) }} and isn't ticked off. <button class="link" @click="markSubmitted(a, true)">{{ a.type === 'exam' ? 'Done' : 'Submitted' }}</button></p>
       </div>
 
       <div v-if="message || atRisk.length" class="notice" :class="{ warn: atRisk.length }">
@@ -183,6 +187,7 @@ export default {
     const modeOf = moduleId => modules.value.find(m => m.id === moduleId)?.mode_override || settings.plannerMode
 
     const needs = computed(() => data.value ? getNeeds(data.value, settings, new Date()) : [])
+    const overdue = computed(() => data.value ? overdueWork(data.value.assessments, new Date()) : [])
     const canPlan = computed(() => modules.value.some(m => modeOf(m.id) !== 'manual'))
     const suggestedCount = computed(() => data.value ? data.value.blocks.filter(b => b.state === 'suggested').length : 0)
 
@@ -262,6 +267,10 @@ export default {
     // plan from the week on screen, as far ahead as chosen
     const planning = ref(false)
     async function plan() {
+      if (weekBounds(weekOf(), zone()).end <= new Date()) {
+        message.value = `That week has already passed, so there's nothing to plan. Go to this week or a later one.`
+        return
+      }
       planning.value = true
       const d = data.value
       const ahead = settings.planAhead
@@ -439,7 +448,7 @@ export default {
     })
 
     return {
-      el, message, viewType, markSubmitted, habit, acceptHabit, dismissHabit, dayChange, moveModuleDay, codeOf, dayNames, planning, settings, saveSetting, atRisk, clashes, clashOf, moveAll, selected, picked, pickedFor, needs, modules, moduleWeek, canPlan, suggestedCount,
+      el, message, viewType, markSubmitted, overdue, habit, acceptHabit, dismissHabit, dayChange, moveModuleDay, codeOf, dayNames, planning, settings, saveSetting, atRisk, clashes, clashOf, moveAll, selected, picked, pickedFor, needs, modules, moduleWeek, canPlan, suggestedCount,
       code, label, partTitle, dayText, whenText, oneDecimal, plan, exportCalendar, accept, acceptAll, dismiss, clearPick, addBlock
     }
   }

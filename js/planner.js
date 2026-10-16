@@ -456,6 +456,7 @@ function keepsLimits(blocks, limits) {
 // so a day is one solid session that only breaks for things like tutorials
 // a day is left as it was if its blocks won't all fit or would miss a finish by date
 export function packDays(blocks, free, settings, limits = {}) {
+  if (settings.solidBlocks === false) return blocks
   const zone = settings.timeZone
   const gap = settings.breakMins * 60000
   const sameWork = (a, b) => a.module_id === b.module_id && a.assessment_id === b.assessment_id && a.task_id === b.task_id
@@ -689,6 +690,13 @@ export function findClashes(data, settings, now) {
     if (!b.byUser && !allowed.some(f => f.start <= start && f.end >= end)) return [{ block: b, reason: 'hours' }]
     return []
   })
+}
+
+// unsubmitted work past its due date, which the planner no longer books time for
+export function overdueWork(assessments, now) {
+  return assessments
+    .filter(a => !a.submitted && new Date(a.due) <= now)
+    .sort((a, b) => a.due.localeCompare(b.due))
 }
 
 // weeks from the week of a date to the last module end or deadline, at least 1
