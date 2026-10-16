@@ -29,7 +29,11 @@ export default {
         </div>
       </header>
 
-      <div class="card">
+      <div v-if="assessment.type === 'exam'" class="card">
+        <p class="hint">Exams don't get hours of their own. Once the module's last TMA is in, your weekly study for it is your revision.</p>
+      </div>
+
+      <div v-else class="card">
         <h2>Parts</h2>
         <p v-if="!tasks.length" class="hint">Estimated at {{ estHours }} hours from the default in Settings. Split it into parts or questions to make the estimate more exact.</p>
         <p v-else class="hint">Parts with no estimate share what is left of the {{ defaultHours(assessment, settings) }} hour default.</p>

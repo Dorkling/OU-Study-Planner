@@ -20,7 +20,7 @@ const quarters = hours => Math.ceil(hours * 4 - 1e-9) / 4
 // logged time if there is one, otherwise block length
 const blockHours = b => b.done_hours ?? hoursBetween(new Date(b.start), new Date(b.end))
 
-const isRevision = a => a.type === 'exam' || a.type === 'ema'
+const isRevision = a => a.type === 'ema'
 
 // blank parts share what's left of the default
 export function partEstimates(tasks, defaultHours) {
@@ -37,7 +37,7 @@ export function assessmentHours(tasks, defaultHours) {
   return [...partEstimates(tasks, defaultHours).values()].reduce((sum, h) => sum + h, 0)
 }
 
-// tmas and exams have separate defaults
+// tmas and emas have separate defaults
 export function defaultHours(assessment, settings) {
   return assessment.type === 'tma' ? settings.hoursPerTma : settings.hoursPerExam
 }
@@ -54,8 +54,8 @@ function partsLeft(tasks, defaultHours) {
 // hours left and target date for each assessment
 export function getNeeds(data, settings, now) {
   return data.assessments
-    // submitted work needs no more time
-    .filter(a => !a.submitted && new Date(a.due) > now)
+    // submitted work needs no more time, and exams are revised in the weekly module study
+    .filter(a => !a.submitted && a.type !== 'exam' && new Date(a.due) > now)
     .map(a => {
       const tasks = data.tasks.filter(t => t.assessment_id === a.id)
       const total = assessmentHours(tasks, defaultHours(a, settings))
@@ -302,7 +302,7 @@ export function planBlocks(free, needs, existing, settings, days = { owners: {},
   return { blocks, atRisk }
 }
 
-// fixed weekly revision hours for exams and emas
+// fixed weekly hours for emas
 function revisionNeeds(data, settings, week, booked, now) {
   const inWeek = b => new Date(b.start) >= week.start && new Date(b.start) < week.end
   return data.assessments

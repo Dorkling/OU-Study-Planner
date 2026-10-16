@@ -122,9 +122,18 @@ test('spread still fits everything when time is tight', () => {
   assert.equal(atRisk.length, 0)
 })
 
-test('exams and emas get the bigger default', () => {
+test('emas get the bigger default', () => {
   assert.equal(defaultHours({ type: 'tma' }, settings), 15)
-  assert.equal(defaultHours({ type: 'exam' }, settings), 30)
+  assert.equal(defaultHours({ type: 'ema' }, settings), 30)
+})
+
+test('exams get no hours of their own and are never at risk', () => {
+  const exam = { id: 'ex', module_id: 'm1', type: 'exam', title: 'Exam', due: at(14, 10).toISOString() }
+  const data = { ...emptyWeek, assessments: [exam] }
+  assert.equal(getNeeds(data, planSettings, at(12, 8)).length, 0)
+  assert.deepEqual(checkRisks(data, planSettings, at(12, 8)), [])
+  const { blocks } = planWeek(data, planSettings, at(12, 8), at(12, 8))
+  assert.ok(blocks.length && blocks.every(b => !b.assessment_id))
 })
 
 // 30 credits over 30 weeks is 10 hours a week
@@ -225,8 +234,8 @@ test('auto blocks in the future are redone, and an identical plan changes nothin
   assert.ok(!third.remove.includes('b0'))
 })
 
-test('fixed weekly revision books the set hours for an exam this week', () => {
-  const exam = { id: 'ex', module_id: 'm1', type: 'exam', title: 'Exam', due: at(30, 10).toISOString() }
+test('fixed weekly hours are booked for an ema this week', () => {
+  const exam = { id: 'ex', module_id: 'm1', type: 'ema', title: 'EMA', due: at(30, 10).toISOString() }
   const data = { ...emptyWeek, assessments: [exam] }
   const { blocks } = planWeek(data, { ...planSettings, revisionMode: 'weekly', revisionHours: 3, trackOptional: false }, at(12, 8), at(12, 8))
   assert.equal(blocks.filter(b => b.assessment_id === 'ex').reduce((sum, b) => sum + hours(b), 0), 3)
@@ -775,4 +784,11 @@ test('unsubmitted work past its due date is listed as overdue, earliest first', 
   const list = [{ ...tma('late', 10), type: 'tma' }, { ...tma('later', 11), type: 'tma' }, { ...tma('done', 9), type: 'tma', submitted: true }, { ...tma('soon', 14), type: 'tma' }]
   assert.deepEqual(overdueWork(list, at(12, 8)).map(a => a.id), ['late', 'later'])
   assert.equal(getNeeds({ ...emptyWeek, assessments: list }, planSettings, at(12, 8)).length, 1)
+})
+
+test('a confirmed exam day is kept clear, a rough one is not', () => {
+  const exam = { id: 'ex', module_id: 'm1', type: 'exam', title: 'Exam', due: at(14, 10).toISOString() }
+  const onExamDay = blocks => blocks.filter(b => new Date(b.start) >= at(14, 0) && new Date(b.start) < at(15, 0)).length
+  assert.equal(onExamDay(planWeek({ ...emptyWeek, assessments: [exam] }, planSettings, at(12, 8), at(12, 8)).blocks), 0)
+  assert.ok(onExamDay(planWeek({ ...emptyWeek, assessments: [{ ...exam, provisional: true }] }, planSettings, at(12, 8), at(12, 8)).blocks) > 0)
 })

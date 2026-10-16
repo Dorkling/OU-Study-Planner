@@ -30,6 +30,7 @@ export default {
       </div>
       <label class="check"><input type="checkbox" v-model="form.provisional"> Rough date, not confirmed yet</label>
       <p v-if="form.provisional" class="hint">Planned from this date until you update it.</p>
+      <p v-else-if="form.type === 'exam'" class="hint">No study is planned on the exam day.</p>
       <div class="actions">
         <button class="primary" :disabled="!valid">Save assessment</button>
         <button type="button" @click="$emit('cancel')">Cancel</button>

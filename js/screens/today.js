@@ -77,7 +77,8 @@ export default {
               <strong>{{ label(n.assessment.module_id, n.assessment.id) }}</strong>
               <p class="hint">
                 {{ n.assessment.type === 'exam' ? 'On' : 'Due' }} {{ dayText(n.assessment.due) }},
-                {{ oneDecimal(n.done) }} of {{ oneDecimal(n.total) }} h done<template v-if="atRisk(n)">, at risk</template><template v-else>, on track</template>
+                <template v-if="n.assessment.type === 'exam'">revised in your weekly study</template>
+                <template v-else>{{ oneDecimal(n.done) }} of {{ oneDecimal(n.total) }} h done<template v-if="atRisk(n)">, at risk</template><template v-else>, on track</template></template>
               </p>
             </div>
             <div class="actions">
@@ -173,9 +174,14 @@ export default {
     const moveAll = () => moveClashes(clashes.value.map(c => c.block))
     const atRisk = n => risks.value.some(r => r.assessment.id === n.assessment.id)
 
-    const dueSoon = computed(() => getNeeds(data.value, settings, new Date())
-      .filter(n => new Date(n.assessment.due) < new Date(Date.now() + 14 * day))
-      .sort((a, b) => a.assessment.due.localeCompare(b.assessment.due)))
+    // exams have no hours of their own but still show when they're close
+    const dueSoon = computed(() => {
+      const now = new Date()
+      const soon = date => new Date(date) > now && new Date(date) < new Date(+now + 14 * day)
+      const exams = data.value.assessments.filter(a => a.type === 'exam' && !a.submitted && soon(a.due)).map(assessment => ({ assessment }))
+      return [...getNeeds(data.value, settings, now).filter(n => soon(n.assessment.due)), ...exams]
+        .sort((a, b) => a.assessment.due.localeCompare(b.assessment.due))
+    })
 
     const todos = computed(() => data.value.tasks.filter(t => !t.assessment_id && t.status !== 'done'))
     const finishTodo = t => save('tasks', { ...t, status: 'done' })

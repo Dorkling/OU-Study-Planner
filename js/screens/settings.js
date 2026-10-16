@@ -138,19 +138,19 @@ export default {
       <div class="card">
         <details>
           <summary>More options</summary>
-          <p class="hint">Estimates the planner starts from. Most people won't need to change these.</p>
+          <p class="hint">Estimates the planner starts from. Most people won't need to change these. Exams don't get hours of their own, your weekly module study is the revision.</p>
           <div class="grid">
             <label>Finish TMAs this many days early <input type="number" v-model.number="settings.tmaBuffer" @change="put('tmaBuffer')" min="0"></label>
             <label>Study hours per credit <input type="number" v-model.number="settings.hoursPerCredit" @change="put('hoursPerCredit')" min="1"></label>
             <label>Default hours per TMA <input type="number" v-model.number="settings.hoursPerTma" @change="put('hoursPerTma')" min="1"></label>
-            <label>EMA and exam revision
+            <label>EMA work
               <select v-model="settings.revisionMode" @change="put('revisionMode')">
                 <option value="planned">Planned to a total, like TMAs</option>
                 <option value="weekly">A fixed amount each week</option>
               </select>
             </label>
-            <label v-if="settings.revisionMode === 'planned'">Revision hours for an EMA or exam <input type="number" v-model.number="settings.hoursPerExam" @change="put('hoursPerExam')" min="1"></label>
-            <label v-else>Revision hours each week <input type="number" v-model.number="settings.revisionHours" @change="put('revisionHours')" min="0" step="0.5"></label>
+            <label v-if="settings.revisionMode === 'planned'">Hours for an EMA <input type="number" v-model.number="settings.hoursPerExam" @change="put('hoursPerExam')" min="1"></label>
+            <label v-else>EMA hours each week <input type="number" v-model.number="settings.revisionHours" @change="put('revisionHours')" min="0" step="0.5"></label>
           </div>
         </details>
       </div>

@@ -112,7 +112,15 @@ export function getBusy(from, to, data, settings) {
 
   const tutorials = data.tutorials.map(t => ({ start: new Date(t.start), end: new Date(t.end) }))
 
-  return [...shifts, ...getBlocked(from, to, data.blocked, zone), ...tutorials, ...blocks]
+  // exam days stay clear once the date is confirmed
+  const exams = (data.assessments || [])
+    .filter(a => a.type === 'exam' && !a.provisional && !a.submitted)
+    .map(a => {
+      const key = dateKey(new Date(a.due), zone)
+      return { start: startOfDay(key, zone), end: startOfDay(addDaysToKey(key, 1), zone) }
+    })
+
+  return [...shifts, ...getBlocked(from, to, data.blocked, zone), ...tutorials, ...exams, ...blocks]
 }
 
 // round up to the next 15 minutes

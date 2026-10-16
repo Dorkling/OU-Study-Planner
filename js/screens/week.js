@@ -84,7 +84,7 @@ export default {
       <div v-if="selected" class="card panel">
         <p><strong>{{ label(selected.module_id, selected.assessment_id) }}</strong><template v-if="partTitle(selected.task_id)">, {{ partTitle(selected.task_id) }}</template></p>
         <p class="hint">{{ whenText(selected.start, selected.end) }}<template v-if="selected.state === 'suggested'">, suggested</template></p>
-        <p v-if="clashOf(selected)" class="hint error">{{ clashOf(selected) === 'busy' ? 'This clashes with work, blocked time or a tutorial.' : 'This is outside your study hours. Drag it to keep it somewhere else.' }}</p>
+        <p v-if="clashOf(selected)" class="hint error">{{ clashOf(selected) === 'busy' ? 'This clashes with work, blocked time, a tutorial or an exam day.' : 'This is outside your study hours. Drag it to keep it somewhere else.' }}</p>
         <div class="actions">
           <button v-if="selected.state === 'suggested'" class="primary" @click="accept(selected)">Accept</button>
           <button @click="dismiss(selected)">{{ selected.state === 'suggested' ? 'Dismiss' : 'Remove' }}</button>
