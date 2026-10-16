@@ -202,9 +202,17 @@ button.danger, button.link.danger { color: var(--danger); }
 .ev-study { --fc-event-bg-color: var(--study); --fc-event-border-color: var(--study); --fc-event-text-color: var(--on-study); }
 .ev-free { --fc-event-bg-color: var(--free); }
 
+/* each module has its own colour, tma work has a stripe down the left */
+.mod-0 { --study: var(--mod-0); --on-study: var(--on-mod); }
+.mod-1 { --study: var(--mod-1); --on-study: var(--on-mod); }
+.mod-2 { --study: var(--mod-2); --on-study: var(--on-mod); }
+.mod-3 { --study: var(--mod-3); --on-study: var(--on-mod); }
+.mod-4 { --study: var(--mod-4); --on-study: var(--on-mod); }
+.fc-event.ev-tma .fc-event-main, .swatch.ev-tma { box-shadow: inset 4px 0 0 rgba(0, 0, 0, .35); }
+
 /* dashed until accepted */
 .ev-suggested { --fc-event-bg-color: var(--suggested); --fc-event-border-color: var(--study); --fc-event-text-color: var(--on-suggested); }
-.fc-event.ev-suggested { border-style: dashed; }
+.fc-event.ev-suggested { border-style: dashed; border-width: 2px; }
 .fc .fc-bg-event.ev-free { opacity: .25; }
 .swatch.ev-free { opacity: .5; }
 
@@ -334,6 +342,14 @@ details[open] summary { margin-bottom: .75rem; }
 .panel-inline .row label { display: flex; flex-direction: column; gap: .25rem; font-size: .9rem; }
 .panel-inline input[type="number"] { width: 6rem; }
 .catch-up { color: var(--accent); }
+
+/* on a phone the time and title share a line, so most blocks fit in two */
+@media (max-width: 600px) {
+  .fc-timegrid-event .fc-event-main-frame { flex-direction: row; flex-wrap: wrap; gap: 0 .3rem; align-items: baseline; }
+  .fc-timegrid-event .fc-event-main { font-size: .78rem; }
+  .fc .fc-timegrid-slot-label-cushion, .fc .fc-col-header-cell-cushion { font-size: .85rem; }
+  .fc .fc-timegrid-axis-cushion { font-size: .8rem; }
+}
 
 /* keep block text readable when a block is short */
 .fc-timegrid-event .fc-event-main { font-size: .8rem; line-height: 1.25; overflow: hidden; }

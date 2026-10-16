@@ -106,11 +106,12 @@ export default {
       </div>
 
       <div class="key">
+        <span v-for="(m, i) in modules" :key="m.id"><i class="swatch ev-study" :class="'mod-' + (i % 5)"></i>{{ m.code }}</span>
+        <span><i class="swatch ev-study ev-tma"></i>TMA work</span>
+        <span><i class="swatch ev-suggested"></i>Suggested</span>
         <span><i class="swatch ev-work"></i>Work</span>
         <span><i class="swatch ev-blocked"></i>Blocked</span>
         <span><i class="swatch ev-tutorial"></i>Tutorial</span>
-        <span><i class="swatch ev-study"></i>Study</span>
-        <span><i class="swatch ev-suggested"></i>Suggested</span>
         <span><i class="swatch ev-free"></i>Free</span>
         <span><i class="swatch ev-due"></i>Deadline</span>
         <span v-if="clashes.length"><i class="swatch ev-clash-key"></i>Clash</span>
@@ -171,6 +172,11 @@ export default {
 
     const modules = computed(() => data.value?.modules || [])
     const code = id => modules.value.find(m => m.id === id)?.code || ''
+    const colourOf = id => `mod-${Math.max(0, modules.value.findIndex(m => m.id === id)) % 5}`
+
+    // phone width columns only have room for a word or two
+    const narrow = () => window.innerWidth < 600
+    const shortLabel = assessmentId => assessmentId ? data.value?.assessments.find(a => a.id === assessmentId)?.title || 'TMA' : 'study'
     const partTitle = id => data.value?.tasks.find(t => t.id === id)?.title || ''
 
     // no assessment means general module study
@@ -240,15 +246,21 @@ export default {
         .map(t => wall({ title: `${code(t.module_id)} ${t.title}`, start: t.start, end: t.end, classNames: ['ev-tutorial'] }))
 
       // only study blocks can be moved
+      // each module has its own colour, so on a phone the label can drop the module code
       const blocks = d.blocks
         .filter(b => b.state !== 'missed')
         .map(b => wall({
           id: b.id,
-          title: label(b.module_id, b.assessment_id),
+          title: narrow() ? shortLabel(b.assessment_id) : label(b.module_id, b.assessment_id),
           start: b.start,
           end: b.end,
           editable: true,
-          classNames: [{ suggested: 'ev-suggested', done: 'ev-done' }[b.state] || 'ev-study', ...(clashOf(b) ? ['ev-clash'] : [])],
+          classNames: [
+            { suggested: 'ev-suggested', done: 'ev-done' }[b.state] || 'ev-study',
+            colourOf(b.module_id),
+            ...(b.assessment_id ? ['ev-tma'] : []),
+            ...(clashOf(b) ? ['ev-clash'] : [])
+          ],
           extendedProps: { block: b }
         }))
 
@@ -384,14 +396,18 @@ export default {
     onMounted(() => {
       calendar = new FullCalendar.Calendar(el.value, {
         locale: enGb,
-        initialView: window.innerWidth < 700 ? 'timeGridDay' : 'timeGridWeek',
-        headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' },
+        initialView: narrow() ? 'threeDay' : 'timeGridWeek',
+        headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,threeDay,timeGridDay' },
         dayHeaderFormat: { weekday: 'short', day: 'numeric' },
-        views: { dayGridMonth: { dayHeaderFormat: { weekday: 'short' }, dayMaxEvents: 4 } },
+        views: {
+          dayGridMonth: { dayHeaderFormat: { weekday: 'short' }, dayMaxEvents: 4 },
+          threeDay: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3 days' }
+        },
         navLinks: true,
-        navLinkDayClick: date => calendar.changeView('timeGridWeek', date),
+        navLinkDayClick: date => calendar.changeView(narrow() ? 'threeDay' : 'timeGridWeek', date),
         slotLabelFormat: clock,
         eventTimeFormat: clock,
+        displayEventEnd: !narrow(),
         slotMinTime: '07:00',
         slotMaxTime: '24:00',
         snapDuration: '00:15:00',
@@ -430,8 +446,15 @@ export default {
       })
       calendar.render()
 
-      // resize when the container changes
-      resizer = new ResizeObserver(() => calendar.updateSize())
+      // resize when the container changes, and swap label style if it crosses phone width
+      let wasNarrow = narrow()
+      resizer = new ResizeObserver(() => {
+        calendar.updateSize()
+        if (narrow() === wasNarrow) return
+        wasNarrow = narrow()
+        calendar.setOption('displayEventEnd', !wasNarrow)
+        calendar.refetchEvents()
+      })
       resizer.observe(el.value)
     })
 
