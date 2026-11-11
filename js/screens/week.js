@@ -2,11 +2,12 @@ import { save, saveMany, remove, live, loadAll } from '../db.js'
 import { settings, saveSetting } from '../settings.js'
 import { keepModuleDays } from '../autoplan.js'
 import { getShifts, getBlocked, getFreeTime, getBusy, dayPlan } from '../freetime.js'
-import { getNeeds, moduleWeekSummary, planWeeks, weeksToEnd, checkRisks, findClashes, joinDropped, overdueWork } from '../planner.js'
+import { getNeeds, moduleWeekSummary, planWeeks, weeksToEnd, checkRisks, findClashes, joinDropped, overdueWork, swapModuleDay } from '../planner.js'
 import CapacityNote from '../components/capacity-note.js'
-import { moveClashes, markSubmitted } from '../progress.js'
+import { moveClashes, markSubmitted, markDone, markMissed } from '../progress.js'
+import { offerUndo } from '../undo.js'
 import { recordMove, habitSuggestion, acceptHabit, dismissHabit } from '../habits.js'
-import { dateKey, clockTime, shortDate, weekBounds, toWall, fromWall, dayNames, weekdayOf } from '../time.js'
+import { dateKey, clockTime, clockRange, shortDate, weekBounds, toWall, fromWall, dayNames, weekdayOf, hoursBetween } from '../time.js'
 import { oneDecimal } from '../estimates.js'
 import { calendarEvents, buildCalendar } from '../ics.js'
 import { downloadFile } from '../backup.js'
@@ -20,12 +21,50 @@ const clock = { hour: '2-digit', minute: '2-digit', hour12: false }
 // earliest study start across the week
 const earliestStudy = () => [0, 1, 2, 3, 4, 5, 6].map(d => dayPlan(settings, d)).filter(d => d.study).map(d => d.start).sort()[0] || '09:00'
 
+// phone width, where columns only have room for a word or two
+const narrow = () => window.innerWidth <= 600
+
+// a night shift or anything else that runs past midnight needs the grid from the start of the day
+// ending at midnight exactly doesn't count
+const startOf = item => item.end <= item.start && item.end !== '00:00' ? '00:00' : item.start
+
 // start the grid early enough for every shift
-function gridStart(pattern, exceptions) {
-  const shifts = [...pattern, ...exceptions.filter(e => e.type === 'shift')]
-  const times = [earliestStudy(), '07:00', ...shifts.map(s => s.end <= s.start ? '00:00' : s.start)]
+// a phone has no room to spare, so it starts at the first thing that's actually on
+function gridStart(d) {
+  const shifts = [...d.pattern, ...d.exceptions.filter(e => e.type === 'shift')]
+  const times = [earliestStudy(), ...shifts.map(startOf)]
+  if (narrow()) times.push(...d.blocked.map(startOf), ...[...d.tutorials, ...d.blocks].map(i => clockTime(new Date(i.start), settings.timeZone)))
+  else times.push('07:00')
   return times.sort()[0].slice(0, 2) + ':00'
 }
+
+// what's in the key besides the modules
+const keyItems = [
+  { style: 'ev-study ev-tma', name: 'TMA work' },
+  { style: 'ev-suggested', name: 'Suggested' },
+  { style: 'ev-work', name: 'Work' },
+  { style: 'ev-blocked', name: 'Blocked' },
+  { style: 'ev-tutorial', name: 'Tutorial' },
+  { style: 'ev-free', name: 'Free' },
+  { style: 'ev-due', name: 'Deadline' }
+]
+
+// one row of buttons on a phone with the views underneath, and the calendar as tall as its hours so only the page scrolls
+const layout = () => narrow()
+  ? {
+      headerToolbar: { left: 'prev,next', center: 'title', right: 'today' },
+      footerToolbar: { center: 'dayGridMonth,timeGridWeek,threeDay,timeGridDay' },
+      titleFormat: { day: 'numeric', month: 'short' },
+      height: 'auto',
+      displayEventEnd: false
+    }
+  : {
+      headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,threeDay,timeGridDay' },
+      footerToolbar: false,
+      titleFormat: { day: 'numeric', month: 'short', year: 'numeric' },
+      height: '75vh',
+      displayEventEnd: true
+    }
 
 export default {
   components: { CapacityNote },
@@ -34,7 +73,7 @@ export default {
       <div class="page-head">
         <h1>{{ viewType === 'dayGridMonth' ? 'Month' : 'Week' }}</h1>
         <div class="actions">
-          <button @click="exportCalendar">Add to calendar</button>
+          <button class="wide-only" @click="exportCalendar">Add to calendar</button>
           <button v-if="suggestedCount" @click="acceptAll">Accept all</button>
           <div v-if="canPlan" class="plan-range">
             <select v-model="settings.planAhead" @change="saveSetting('planAhead', settings.planAhead)" aria-label="How far ahead to plan">
@@ -81,13 +120,28 @@ export default {
         <p v-for="r in atRisk">{{ label(r.assessment.module_id, r.assessment.id) }} is at risk: {{ r.hours }} h won't fit before {{ dayText(r.target) }}.</p>
       </div>
 
+      <div v-if="unplanned" class="notice">
+        <p>Nothing's planned yet. Choose how far ahead and press Plan.</p>
+      </div>
+
       <div v-if="selected" class="card panel">
         <p><strong>{{ label(selected.module_id, selected.assessment_id) }}</strong><template v-if="partTitle(selected.task_id)">, {{ partTitle(selected.task_id) }}</template></p>
         <p class="hint">{{ whenText(selected.start, selected.end) }}<template v-if="selected.state === 'suggested'">, suggested</template></p>
         <p v-if="clashOf(selected)" class="hint error">{{ clashOf(selected) === 'busy' ? 'This clashes with work, blocked time, a tutorial or an exam day.' : 'This is outside your study hours. Drag it to keep it somewhere else.' }}</p>
+        <label v-if="canChange(selected)" class="inline">Change to
+          <select :value="workOf(selected)" @change="changeWork(selected, $event.target.value)">
+            <option v-if="!workOptions.some(o => o.value === workOf(selected))" :value="workOf(selected)">{{ label(selected.module_id, selected.assessment_id) }}</option>
+            <option v-for="o in workOptions" :value="o.value">{{ o.name }}</option>
+          </select>
+        </label>
+        <p v-if="keepsFree(selected)" class="hint">Removing it keeps this time free, so the planner won't book it again. You can change that in Settings under Blocked time.</p>
         <div class="actions">
           <button v-if="selected.state === 'suggested'" class="primary" @click="accept(selected)">Accept</button>
-          <button @click="dismiss(selected)">{{ selected.state === 'suggested' ? 'Dismiss' : 'Remove' }}</button>
+          <template v-if="selected.state === 'accepted' && isOver(selected)">
+            <button class="primary" @click="finish(selected)">Done</button>
+            <button @click="miss(selected)">Missed</button>
+          </template>
+          <button @click="dismiss(selected)">{{ selected.state === 'suggested' ? 'Dismiss' : keepsFree(selected) ? 'Remove and keep free' : 'Remove' }}</button>
           <button class="link" @click="selected = null">Close</button>
         </div>
       </div>
@@ -95,11 +149,14 @@ export default {
       <div v-if="picked" class="card panel">
         <p>New study block, {{ whenText(picked.start, picked.end) }}</p>
         <div class="row">
+          <label class="inline">Ends <input type="time" :value="clockOf(picked.end)" @change="setPickedEnd($event.target.value)"></label>
           <select v-model="pickedFor" aria-label="What to work on">
             <option value="" disabled>Choose what to work on</option>
-            <option v-for="n in needs" :value="'a:' + n.assessment.id">{{ label(n.assessment.module_id, n.assessment.id) }}</option>
-            <option v-for="m in modules" :value="'m:' + m.id">{{ m.code }} study</option>
+            <option v-for="o in workOptions" :value="o.value">{{ o.name }}</option>
           </select>
+        </div>
+        <p v-if="pickError" class="hint error">{{ pickError }}</p>
+        <div class="actions">
           <button class="primary" :disabled="!pickedFor" @click="addBlock">Add block</button>
           <button class="link" @click="clearPick">Cancel</button>
         </div>
@@ -107,17 +164,23 @@ export default {
 
       <div class="key">
         <span v-for="(m, i) in modules" :key="m.id"><i class="swatch ev-study" :class="'mod-' + (i % 5)"></i>{{ m.code }}</span>
-        <span><i class="swatch ev-study ev-tma"></i>TMA work</span>
-        <span><i class="swatch ev-suggested"></i>Suggested</span>
-        <span><i class="swatch ev-work"></i>Work</span>
-        <span><i class="swatch ev-blocked"></i>Blocked</span>
-        <span><i class="swatch ev-tutorial"></i>Tutorial</span>
-        <span><i class="swatch ev-free"></i>Free</span>
-        <span><i class="swatch ev-due"></i>Deadline</span>
-        <span v-if="clashes.length"><i class="swatch ev-clash-key"></i>Clash</span>
+        <span v-for="k in keyItems" :key="k.name" class="wide-only"><i class="swatch" :class="k.style"></i>{{ k.name }}</span>
+        <span v-if="clashes.length" class="wide-only"><i class="swatch ev-clash-key"></i>Clash</span>
       </div>
-      <p class="hint">Drag over free time to add a block. Click a block to accept or remove it, drag to move it. In Month, click a date to open that week.</p>
+      <p class="hint wide-only">Click or drag over free time to add a block. Click a block for options, drag to move it. In Month, click a date to open that week.</p>
       <div ref="el" class="calendar card"></div>
+
+      <div class="narrow-only below-calendar">
+        <p class="hint">Tap free time to add a block. Tap a block for options, press and hold to move it.</p>
+        <details>
+          <summary>Key</summary>
+          <div class="key">
+            <span v-for="k in keyItems" :key="k.name"><i class="swatch" :class="k.style"></i>{{ k.name }}</span>
+            <span v-if="clashes.length"><i class="swatch ev-clash-key"></i>Clash</span>
+          </div>
+        </details>
+        <div class="actions"><button @click="exportCalendar">Add to calendar</button></div>
+      </div>
 
       <div v-if="moduleWeek.length" class="card">
         <h2>Module study this week</h2>
@@ -159,7 +222,9 @@ export default {
     const selected = ref(null)
     const picked = ref(null)
     const pickedFor = ref('')
+    const pickError = ref('')
     const viewStart = ref(new Date())
+    const viewEnd = ref(new Date())
     const viewType = ref('')
     let calendar, resizer
 
@@ -174,8 +239,7 @@ export default {
     const code = id => modules.value.find(m => m.id === id)?.code || ''
     const colourOf = id => `mod-${Math.max(0, modules.value.findIndex(m => m.id === id)) % 5}`
 
-    // phone width columns only have room for a word or two
-    const narrow = () => window.innerWidth < 600
+    // each module has its own colour, so a phone label can leave the code out
     const shortLabel = assessmentId => assessmentId ? data.value?.assessments.find(a => a.id === assessmentId)?.title || 'TMA' : 'study'
     const partTitle = id => data.value?.tasks.find(t => t.id === id)?.title || ''
 
@@ -187,6 +251,7 @@ export default {
     }
 
     const dayText = date => shortDate(date, zone())
+    const clockOf = date => clockTime(new Date(date), zone())
     const whenText = (start, end) => `${shortDate(start, zone())}, ${clockTime(new Date(start), zone())} to ${clockTime(new Date(end), zone())}`
 
     // module mode overrides the setting
@@ -196,6 +261,24 @@ export default {
     const overdue = computed(() => data.value ? overdueWork(data.value.assessments, new Date()) : [])
     const canPlan = computed(() => modules.value.some(m => modeOf(m.id) !== 'manual'))
     const suggestedCount = computed(() => data.value ? data.value.blocks.filter(b => b.state === 'suggested').length : 0)
+
+    // nothing on the calendar yet, so say what to do first
+    const unplanned = computed(() => data.value && canPlan.value && !data.value.blocks.some(b => b.state !== 'missed'))
+
+    // what a block can be for, a: is an assessment and m: is module study
+    const workOptions = computed(() => [
+      ...needs.value.map(n => ({ value: `a:${n.assessment.id}`, name: label(n.assessment.module_id, n.assessment.id) })),
+      ...modules.value.map(m => ({ value: `m:${m.id}`, name: `${m.code} study` }))
+    ])
+    const workOf = block => block.assessment_id ? `a:${block.assessment_id}` : `m:${block.module_id}`
+    function workFrom(value) {
+      const [kind, id] = value.split(':')
+      const assessment = kind === 'a' ? data.value.assessments.find(a => a.id === id) : null
+      return { assessment_id: assessment?.id || null, module_id: assessment ? assessment.module_id : id }
+    }
+
+    // the deadline row only earns its space on a phone when something is due in the days showing
+    const showDue = () => !narrow() || viewType.value === 'dayGridMonth' || (data.value?.assessments || []).some(a => new Date(a.due) >= viewStart.value && new Date(a.due) < viewEnd.value)
 
     // month view plans and totals this week, week and day views use the one on screen
     const weekOf = () => viewType.value === 'dayGridMonth' ? new Date() : viewStart.value
@@ -328,24 +411,63 @@ export default {
       message.value = ''
     }
 
+    const isOver = block => new Date(block.end) <= new Date()
+    const canChange = block => block.state !== 'done' && !isOver(block)
+
+    // a block the planner made would be booked straight back into the gap, so removing one keeps the time free
+    const keepsFree = block => block.state === 'accepted' && block.auto && new Date(block.start) > new Date()
+
     async function dismiss(block) {
+      const steps = { restore: [['blocks', [block.id]]] }
+      if (keepsFree(block)) {
+        const start = new Date(block.start)
+        const kept = await save('blocked_time', { label: 'Kept free', date: dateKey(start, zone()), start: clockTime(start, zone()), end: clockTime(new Date(block.end), zone()) })
+        steps.remove = [['blocked_time', [kept.id]]]
+      }
       await remove('blocks', block.id)
+      offerUndo(`Removed ${label(block.module_id, block.assessment_id)}.`, steps)
       selected.value = null
+    }
+
+    // done for its full length, the today screen is where hours get changed
+    async function finish(block) {
+      await markDone(block, hoursBetween(new Date(block.start), new Date(block.end)))
+      selected.value = null
+    }
+
+    async function miss(block) {
+      await markMissed(block)
+      selected.value = null
+    }
+
+    // switching what a block is for makes it yours, so the planner leaves it alone
+    async function changeWork(block, value) {
+      selected.value = await save('blocks', { ...block, ...workFrom(value), task_id: null, auto: false, byUser: true })
     }
 
     function clearPick() {
       picked.value = null
       pickedFor.value = ''
+      pickError.value = ''
       calendar.unselect()
     }
 
-    // a: is an assessment, m: is module study
+    // a new end time for the block being added
+    function setPickedEnd(time) {
+      if (!time) return
+      const start = picked.value.start
+      const { end } = clockRange(dateKey(start, zone()), clockTime(start, zone()), time, zone())
+      if (overlapsBusy(start, end)) {
+        pickError.value = 'That runs into work, blocked time or a tutorial.'
+        return
+      }
+      pickError.value = ''
+      calendar.select(toWall(start, zone()), toWall(end, zone()))
+    }
+
     async function addBlock() {
-      const [kind, id] = pickedFor.value.split(':')
-      const assessment = kind === 'a' ? data.value.assessments.find(a => a.id === id) : null
       await save('blocks', {
-        assessment_id: assessment?.id || null,
-        module_id: assessment ? assessment.module_id : id,
+        ...workFrom(pickedFor.value),
         task_id: null,
         start: picked.value.start.toISOString(),
         end: picked.value.end.toISOString(),
@@ -365,14 +487,9 @@ export default {
 
     // the module takes the new weekday, and whatever had it swaps onto the old one
     async function moveModuleDay() {
-      const { module_id, from, to } = dayChange.value
-      const days = { ...settings.moduleDays }
-      const other = days[to]
-      days[to] = module_id
-      if (other) days[from] = other
-      else delete days[from]
+      const { module_id, to } = dayChange.value
       dayChange.value = null
-      await saveSetting('moduleDays', days)
+      await saveSetting('moduleDays', swapModuleDay(settings.moduleDays, module_id, to))
     }
 
     // moving a block accepts it, and dropping it against the same work joins them
@@ -397,34 +514,44 @@ export default {
       calendar = new FullCalendar.Calendar(el.value, {
         locale: enGb,
         initialView: narrow() ? 'threeDay' : 'timeGridWeek',
-        headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,threeDay,timeGridDay' },
+        ...layout(),
         dayHeaderFormat: { weekday: 'short', day: 'numeric' },
         views: {
-          dayGridMonth: { dayHeaderFormat: { weekday: 'short' }, dayMaxEvents: 4 },
+          dayGridMonth: { dayHeaderFormat: { weekday: 'short' }, dayMaxEvents: 4, titleFormat: { month: 'long', year: 'numeric' } },
           threeDay: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3 days' }
         },
         navLinks: true,
         navLinkDayClick: date => calendar.changeView(narrow() ? 'threeDay' : 'timeGridWeek', date),
         slotLabelFormat: clock,
         eventTimeFormat: clock,
-        displayEventEnd: !narrow(),
         slotMinTime: '07:00',
         slotMaxTime: '24:00',
         snapDuration: '00:15:00',
         eventShortHeight: 50,
         eventMinHeight: 18,
         allDayText: 'Due',
-        height: '75vh',
         scrollTime: earliestStudy(),
         nowIndicator: true,
         now: () => toWall(new Date(), zone()),
         selectable: true,
         selectMirror: true,
         unselectAuto: false,
+        // a plain click or tap is handled by dateClick, and a shorter hold makes dragging on a phone less of a wait
+        selectMinDistance: 5,
+        longPressDelay: 400,
         events,
         datesSet(info) {
           viewStart.value = fromWall(info.start, zone())
+          viewEnd.value = fromWall(info.end, zone())
           viewType.value = info.view.type
+          fitDueRow()
+        },
+        // a click or tap on free time starts an hour long block there
+        dateClick(info) {
+          if (info.allDay || info.view.type === 'dayGridMonth') return
+          const end = new Date(+info.date + Math.max(60, settings.minBlock) * 60000)
+          if (overlapsBusy(fromWall(info.date, zone()), fromWall(end, zone()))) return
+          calendar.select(info.date, end)
         },
         selectAllow(info) {
           return !info.allDay && !overlapsBusy(fromWall(info.start, zone()), fromWall(info.end, zone()))
@@ -439,24 +566,39 @@ export default {
         },
         select(info) {
           selected.value = null
+          pickError.value = ''
           picked.value = { start: fromWall(info.start, zone()), end: fromWall(info.end, zone()) }
+
+          // offer the module that usually has this day
+          const usual = settings.moduleDays?.[weekdayIn(picked.value.start)]
+          if (!pickedFor.value && modules.value.some(m => m.id === usual)) pickedFor.value = `m:${usual}`
         },
         eventDrop: moved,
         eventResize: moved
       })
       calendar.render()
 
-      // resize when the container changes, and swap label style if it crosses phone width
+      // resize when the container changes, and swap layout and labels if it crosses phone width
       let wasNarrow = narrow()
       resizer = new ResizeObserver(() => {
         calendar.updateSize()
         if (narrow() === wasNarrow) return
         wasNarrow = narrow()
-        calendar.setOption('displayEventEnd', !wasNarrow)
+        for (const [option, value] of Object.entries(layout())) calendar.setOption(option, value)
+        if (data.value) calendar.setOption('slotMinTime', gridStart(data.value))
+        fitDueRow()
         calendar.refetchEvents()
       })
       resizer.observe(el.value)
     })
+
+    // only set when it changes, as setting it redraws the calendar
+    let dueRow = true
+    function fitDueRow() {
+      if (!calendar || showDue() === dueRow) return
+      dueRow = showDue()
+      calendar.setOption('allDaySlot', dueRow)
+    }
 
     onUnmounted(() => {
       resizer?.disconnect()
@@ -465,14 +607,18 @@ export default {
 
     // refresh when data changes
     watch(data, value => {
+      // the block in the panel may have been replanned or changed elsewhere
+      if (selected.value) selected.value = value.blocks.find(b => b.id === selected.value.id) || null
       if (!calendar) return
-      calendar.setOption('slotMinTime', gridStart(value.pattern, value.exceptions))
+      calendar.setOption('slotMinTime', gridStart(value))
+      fitDueRow()
       calendar.refetchEvents()
     })
 
     return {
       el, message, viewType, markSubmitted, overdue, habit, acceptHabit, dismissHabit, dayChange, moveModuleDay, codeOf, dayNames, planning, settings, saveSetting, atRisk, clashes, clashOf, moveAll, selected, picked, pickedFor, needs, modules, moduleWeek, canPlan, suggestedCount,
-      code, label, partTitle, dayText, whenText, oneDecimal, plan, exportCalendar, accept, acceptAll, dismiss, clearPick, addBlock
+      code, label, partTitle, dayText, whenText, oneDecimal, plan, exportCalendar, accept, acceptAll, dismiss, clearPick, addBlock,
+      keyItems, unplanned, workOptions, workOf, changeWork, canChange, isOver, keepsFree, finish, miss, clockOf, setPickedEnd, pickError
     }
   }
 }

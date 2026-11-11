@@ -45,6 +45,12 @@ export function remove(table, ids) {
   return db[table].where('id').anyOf(list).modify({ deleted: true, updated: Date.now() })
 }
 
+// bring soft deleted records back
+export function restore(table, ids) {
+  const list = Array.isArray(ids) ? ids : [ids]
+  return db[table].where('id').anyOf(list).modify({ deleted: false, updated: Date.now() })
+}
+
 export async function removeAssessment(id) {
   await remove('tasks', await db.tasks.where('assessment_id').equals(id).primaryKeys())
   await remove('blocks', await db.blocks.where('assessment_id').equals(id).primaryKeys())

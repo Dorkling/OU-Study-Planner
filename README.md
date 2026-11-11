@@ -15,14 +15,16 @@ Not affiliated with or endorsed by The Open University.
 - Plan a week, a month, two months or right up to the end of your modules
 - Set which days you study, the times and how long, and whether each day is preferred, normal or only used if needed
 - Notices if you keep moving study off or onto a day and offers to change that day for you
-- Keeps each module to its own days where it can, with each day's study in one session and TMA work after the reading
+- Keeps each module to the same day every week, with each day's study in one session and TMA work after the reading. You can pick the days or just drag a block and it asks
 - Spreads TMA work up to a few days before the deadline and warns you if it won't fit
 - Tells you if your modules need more time than you've got free, and shares what there is fairly
 - Tick off TMAs when they're submitted so the time goes back to other study
+- Exams are revised in your normal weekly study, and the exam day is kept clear once the date is confirmed
 - Catch up on a module you've fallen behind with by adding a few extra hours a week until the next TMA
 - Add tutorials by pasting the booking confirmation page or from a screenshot
 - Missed tutorials that were recorded get added as a "watch recording" task
-- Week and month views, calendar export for Google or Apple Calendar, and reminders on Windows
+- Week, 3 day and month views with a colour for each module, calendar export for Google or Apple Calendar, and reminders on Windows
+- Tap free time to add a block, tap a block to change, finish or remove it, and undo anything you remove
 - Share a module's dates with classmates
 - Works offline, light and dark mode, and any time zone (UK by default)
 

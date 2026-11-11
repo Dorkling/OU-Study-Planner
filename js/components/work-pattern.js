@@ -1,4 +1,5 @@
-import { all, save, remove, live } from '../db.js'
+import { all, save, live } from '../db.js'
+import { removeWithUndo } from '../undo.js'
 import { dayNames, weekOrder } from '../time.js'
 
 // monday first, then by start time
@@ -17,7 +18,7 @@ export default {
         <input type="time" v-model="s.start" @change="update(s)" aria-label="Start">
         <span>to</span>
         <input type="time" v-model="s.end" @change="update(s)" aria-label="End">
-        <button type="button" class="link danger" @click="remove('work_pattern', s.id)">Remove</button>
+        <button type="button" class="link danger" @click="removeWithUndo('work_pattern', s.id, 'Removed the ' + dayNames[s.weekday] + ' shift.')">Remove</button>
       </div>
       <div class="actions">
         <button type="button" @click="add">Add shift</button>
@@ -41,6 +42,6 @@ export default {
       save('work_pattern', next)
     }
 
-    return { shifts, dayNames, weekOrder, update, add, remove }
+    return { shifts, dayNames, weekOrder, update, add, removeWithUndo }
   }
 }

@@ -1,4 +1,5 @@
-import { db, all, save, remove, removeAssessment, live } from '../db.js'
+import { db, all, save, removeAssessment, live } from '../db.js'
+import { removeWithUndo } from '../undo.js'
 import { dateAndTime, shortDate } from '../time.js'
 import { markSubmitted } from '../progress.js'
 import { oneDecimal } from '../estimates.js'
@@ -43,7 +44,7 @@ export default {
           <input class="part-title" v-model.trim="t.title" @change="save('tasks', t)" aria-label="Part">
           <label>Estimate <input type="number" v-model.number="t.est_hours" @change="save('tasks', t)" :placeholder="autoEstimate(t)" min="0" step="0.5"> h</label>
           <label>Done <input type="number" v-model.number="t.done_hours" @change="save('tasks', t)" min="0" step="0.25"> h</label>
-          <button class="link danger" @click="remove('tasks', t.id)">Remove</button>
+          <button class="link danger" @click="removeWithUndo('tasks', t.id, 'Removed ' + t.title + '.')">Remove</button>
         </div>
 
         <form class="row" @submit.prevent="addPart">
@@ -109,7 +110,7 @@ export default {
 
     return {
       editing, newTitle, loaded, assessment, module, tasks, estHours, doneHours, percent, dueText, settings, autoEstimate, defaultHours, markSubmitted, shortDate,
-      saveAssessment, deleteAssessment, addPart, toggleDone, save, remove
+      saveAssessment, deleteAssessment, addPart, toggleDone, save, removeWithUndo
     }
   }
 }

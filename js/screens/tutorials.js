@@ -1,4 +1,5 @@
-import { all, save, remove, live } from '../db.js'
+import { all, save, live } from '../db.js'
+import { removeWithUndo } from '../undo.js'
 import { parseTutorial, isDuplicate } from '../tutorials.js'
 import { shortDate, clockTime } from '../time.js'
 import { settings } from '../settings.js'
@@ -63,7 +64,7 @@ export default {
             </div>
             <div class="actions">
               <button class="link" @click="open(t)">Edit</button>
-              <button class="link danger" @click="remove('tutorials', t.id)">Delete</button>
+              <button class="link danger" @click="removeWithUndo('tutorials', t.id, 'Deleted ' + t.title + '.')">Delete</button>
             </div>
           </li>
         </ul>
@@ -136,7 +137,7 @@ export default {
 
     return {
       method, pasted, readError, message, draft, draftKey, modules, upcoming,
-      code, when, open, readPasted, reading, readScreenshot, saveTutorial, remove
+      code, when, open, readPasted, reading, readScreenshot, saveTutorial, removeWithUndo
     }
   }
 }

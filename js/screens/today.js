@@ -31,6 +31,19 @@ export default {
         <p v-for="r in risks">{{ label(r.assessment.module_id, r.assessment.id) }} is at risk: about {{ r.hours }} h won't fit before {{ dayText(r.target) }}.</p>
       </div>
 
+      <div class="card">
+        <h2>Coming up</h2>
+        <p v-if="!upcoming.length" class="hint">Nothing booked for today or tomorrow. <a href="#/week">Plan your week</a></p>
+        <ul class="list">
+          <li v-for="item in upcoming" :key="item.id">
+            <div class="grow">
+              <strong>{{ item.title }}</strong>
+              <p class="hint">{{ item.when }}</p>
+            </div>
+          </li>
+        </ul>
+      </div>
+
       <div v-if="checkIns.length || tutorialCheckIns.length" class="card">
         <h2>How did it go?</h2>
         <p v-if="checkIns.length > 1" class="hint">Blocks from the last few days. <button class="link" @click="allDone">They all went to plan</button></p>
@@ -53,19 +66,6 @@ export default {
           <button @click="markMissedTutorial(t, false)">Missed</button>
         </div>
         <p v-if="replanned" class="hint">This week has been replanned.</p>
-      </div>
-
-      <div class="card">
-        <h2>Coming up</h2>
-        <p v-if="!upcoming.length" class="hint">Nothing booked for today or tomorrow. <a href="#/week">Plan your week</a></p>
-        <ul class="list">
-          <li v-for="item in upcoming" :key="item.id">
-            <div class="grow">
-              <strong>{{ item.title }}</strong>
-              <p class="hint">{{ item.when }}</p>
-            </div>
-          </li>
-        </ul>
       </div>
 
       <div class="card">

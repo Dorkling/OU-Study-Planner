@@ -365,3 +365,89 @@ details[open] summary { margin-bottom: .75rem; }
 /* new version ready */
 .banner.update { background: var(--accent-soft); color: var(--text); }
 .banner.update .link { color: var(--accent); }
+
+/* shown only on a phone, or only on anything wider */
+@media (min-width: 601px) { .narrow-only { display: none !important; } }
+@media (max-width: 600px) { .wide-only { display: none !important; } }
+
+/* sync status in the header */
+.sync { margin-left: auto; font-size: .85rem; color: var(--muted); white-space: nowrap; }
+.sync a, .sync .link { color: inherit; padding: 0; }
+
+/* undo after removing something */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  max-width: calc(100vw - 2rem);
+  padding: .6rem 1rem;
+  background: var(--text);
+  color: var(--bg);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .3);
+}
+
+.toast .link { color: inherit; font-weight: 600; }
+
+/* a label beside its field */
+label.inline { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; font-size: .9rem; }
+.panel label.inline { margin-bottom: .5rem; }
+
+/* each module's usual day */
+.usual-days { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; margin: .25rem 0 .75rem 1.6rem; }
+.usual-days .hint { flex-basis: 100%; margin: 0; }
+
+/* check ins: what it was on one line, the buttons on the next */
+.check-in .grow { flex: 1 1 100%; }
+
+/* folded away text */
+.below-calendar summary, details.notice summary { font-size: .95rem; font-weight: 400; }
+.below-calendar details { margin-bottom: .75rem; }
+.below-calendar .key { margin: 0; }
+
+/* the week on a phone: the calendar comes first and everything else gets out of its way */
+@media (max-width: 600px) {
+  .page-head { margin-bottom: .6rem; }
+  .page-head h1 { display: none; }
+  .page-head .actions { width: 100%; }
+  .plan-range, .plan-range select { flex: 1; }
+
+  .key { gap: .3rem .9rem; margin-bottom: .5rem; font-size: .85rem; }
+
+  /* edge to edge, so the day columns get every pixel */
+  .calendar.card { margin: 0 -1rem 1rem; padding: .35rem 0 0; border-left: 0; border-right: 0; border-radius: 0; }
+  .fc .fc-header-toolbar { flex-wrap: nowrap; margin-bottom: .4rem; padding: 0 .5rem; }
+  .fc .fc-toolbar-title { font-size: 1rem; }
+
+  /* the view buttons stay in reach above the nav while the calendar scrolls */
+  .fc .fc-footer-toolbar {
+    position: sticky;
+    bottom: calc(3.3rem + env(safe-area-inset-bottom));
+    z-index: 4;
+    justify-content: center;
+    margin: 0;
+    padding: .4rem .5rem;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+
+  /* block details and new blocks open as a sheet above the nav, wherever the page is scrolled to */
+  .panel {
+    position: fixed;
+    left: .5rem;
+    right: .5rem;
+    bottom: calc(3.6rem + env(safe-area-inset-bottom));
+    z-index: 9;
+    max-height: 60vh;
+    margin: 0;
+    overflow: auto;
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, .35);
+  }
+
+  .toast { bottom: calc(4.2rem + env(safe-area-inset-bottom)); }
+}

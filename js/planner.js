@@ -361,6 +361,17 @@ export function weekdayOwners(moduleIds, settings, mine = []) {
   return owners
 }
 
+// give a module a weekday as its usual day, whatever had that day takes the module's old one
+export function swapModuleDay(days, moduleId, weekday) {
+  const next = { ...days }
+  const old = Object.keys(next).find(day => next[day] === moduleId)
+  const other = next[weekday]
+  if (old !== undefined) delete next[old]
+  next[weekday] = moduleId
+  if (other && other !== moduleId && old !== undefined) next[old] = other
+  return next
+}
+
 // give each study day to one module so days aren't mixed, keeping to the same weekdays each week
 // when time is short each module's claim on its own days stops at its fair share of the week
 export function assignDays(free, moduleNeeds, settings, kept = [], mine = []) {

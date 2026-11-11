@@ -1,8 +1,12 @@
-import { all, save, remove, live } from '../db.js'
-import { settings, saveSetting, setDay } from '../settings.js'
+import { all, save, live } from '../db.js'
+import { settings, saveSetting } from '../settings.js'
 import { dayNames, weekOrder, dateKey, defaultZone, deviceZone } from '../time.js'
 import { dayPlan } from '../freetime.js'
+import { swapModuleDay } from '../planner.js'
+import { removeWithUndo } from '../undo.js'
+import { install, installApp } from '../updates.js'
 import WorkPattern from '../components/work-pattern.js'
+import StudyDays from '../components/study-days.js'
 import ZonePicker from '../components/zone-picker.js'
 import { downloadBackup, restoreBackup } from '../backup.js'
 import { canNotify, turnOnReminders, turnOffReminders } from '../notify.js'
@@ -14,7 +18,7 @@ const byDate = (a, b) => a.date.localeCompare(b.date)
 const { ref, computed } = Vue
 
 export default {
-  components: { WorkPattern, ZonePicker },
+  components: { WorkPattern, StudyDays, ZonePicker },
   template: `
     <section>
       <h1>Settings</h1>
@@ -38,7 +42,7 @@ export default {
             <span>to</span>
             <input type="time" v-model="e.end" @change="update('exceptions', e)" aria-label="End">
           </template>
-          <button class="link danger" @click="remove('exceptions', e.id)">Remove</button>
+          <button class="link danger" @click="removeWithUndo('exceptions', e.id, 'Removed the change to work.')">Remove</button>
         </div>
         <div class="actions"><button @click="addException">Add change</button></div>
       </div>
@@ -59,7 +63,7 @@ export default {
           <input type="time" v-model="b.start" @change="update('blocked_time', b)" aria-label="Start">
           <span>to</span>
           <input type="time" v-model="b.end" @change="update('blocked_time', b)" aria-label="End">
-          <button class="link danger" @click="remove('blocked_time', b.id)">Remove</button>
+          <button class="link danger" @click="removeWithUndo('blocked_time', b.id, 'Removed ' + (b.label || 'the blocked time') + '.')">Remove</button>
         </div>
         <div class="actions"><button @click="addBlocked">Add blocked time</button></div>
       </div>
@@ -88,7 +92,16 @@ export default {
         <label class="check"><input type="checkbox" v-model="settings.tmaLast" @change="put('tmaLast')"> Put TMA work after study on the same day</label>
         <p class="hint">So you read and study first, then write.</p>
         <label class="check"><input type="checkbox" v-model="settings.groupByDay" @change="put('groupByDay')"> Keep each module to its own days where possible</label>
-        <p class="hint">The module that needs the most time gets the biggest free day, and so on. If time is short, modules still share so none miss out.</p>
+        <p class="hint">Each module keeps the same day every week. A spare day is only used when a module's own day is full.</p>
+        <div v-if="settings.groupByDay && currentModules.length > 1" class="usual-days">
+          <label v-for="m in currentModules" :key="m.id" class="inline">{{ m.code }}
+            <select :value="usualDay(m)" @change="setUsualDay(m, $event.target.value)" :aria-label="m.code + ' usual day'">
+              <option v-if="usualDay(m) === ''" value="" disabled>Not set</option>
+              <option v-for="d in studyWeekdays" :value="d">{{ dayNames[d] }}</option>
+            </select>
+          </label>
+          <p class="hint">Picking a day another module has swaps the two. In Suggest mode, press Plan on the Week screen to see the change.</p>
+        </div>
         <label class="check"><input type="checkbox" v-model="settings.trackOptional" @change="put('trackOptional')"> Plan weekly module study from credits</label>
         <p class="hint">Adds general study (reading, activities) to reach each module's weekly hours. TMA work and tutorials count toward it.</p>
       </div>
@@ -96,22 +109,7 @@ export default {
       <div class="card">
         <h2>When you study</h2>
         <p class="hint">Tick the days you study and when you're free. Preferred days get filled first. Only if needed days stay free unless a TMA or EMA won't fit otherwise.</p>
-        <div class="days">
-          <div class="day-row day-head" aria-hidden="true">
-            <span>Day</span><span>From</span><span>To</span><span>Max hours</span><span>Use</span>
-          </div>
-          <div v-for="d in dayRows" :key="d.weekday" class="day-row" :class="{ off: !d.study }">
-            <label class="check"><input type="checkbox" :checked="d.study" @change="editDay(d.weekday, 'study', $event.target.checked)"> {{ dayNames[d.weekday] }}</label>
-            <input type="time" :value="d.start" :disabled="!d.study" @change="editDay(d.weekday, 'start', $event.target.value)" :aria-label="dayNames[d.weekday] + ' from'">
-            <input type="time" :value="d.end" :disabled="!d.study" @change="editDay(d.weekday, 'end', $event.target.value)" :aria-label="dayNames[d.weekday] + ' to'">
-            <input type="number" :value="d.maxHours" :disabled="!d.study" min="0.5" step="0.5" @change="editDay(d.weekday, 'maxHours', Number($event.target.value))" :aria-label="dayNames[d.weekday] + ' max hours'">
-            <select :value="d.use" :disabled="!d.study" @change="editDay(d.weekday, 'use', $event.target.value)" :aria-label="dayNames[d.weekday] + ' use'">
-              <option value="preferred">Preferred</option>
-              <option value="normal">Normal</option>
-              <option value="backup">Only if needed</option>
-            </select>
-          </div>
-        </div>
+        <StudyDays />
 
         <h3>On days you work</h3>
         <div class="segmented" role="radiogroup" aria-label="Study on work days">
@@ -243,6 +241,7 @@ export default {
         <h2>About</h2>
         <p>Free and open source. Not affiliated with or endorsed by The Open University.</p>
         <p class="hint">Your data stays on this device, and in your Google Drive if sync is on. No accounts, analytics or tracking. <a href="privacy.html">Privacy policy</a></p>
+        <div v-if="install.ready" class="actions"><button @click="installApp">Install app</button></div>
       </div>
 
       <div class="card">
@@ -253,17 +252,26 @@ export default {
     </section>`,
   setup() {
     const exceptions = live(async () => (await all('exceptions')).sort(byDate))
-    const blocked = live(() => all('blocked_time'))
+    const today = () => dateKey(new Date(), settings.timeZone)
+
+    // one-off blocks that have passed, like time kept free last week, drop off the list
+    const blocked = live(async () => (await all('blocked_time')).filter(b => !b.date || b.date >= today()))
 
     const modeHints = {
-      auto: 'Plan my week adds blocks straight into the plan',
-      suggest: 'Plan my week suggests blocks to accept, move or dismiss',
+      auto: 'Plan adds blocks straight into your week and keeps them up to date',
+      suggest: 'Plan suggests blocks to accept, move or dismiss',
       manual: 'Shows free time and hours left, you place every block'
     }
 
-    const dayRows = computed(() => weekOrder.map(weekday => ({ weekday, ...dayPlan(settings, weekday) })))
-
-    const editDay = setDay
+    // each module's usual weekday, out of the days study normally goes on
+    const modules = live(() => all('modules'))
+    const currentModules = computed(() => modules.value.filter(m => m.end >= today()))
+    const studyWeekdays = computed(() => weekOrder.filter(d => {
+      const day = dayPlan(settings, d)
+      return day.study && day.maxHours > 0 && day.use !== 'backup'
+    }))
+    const usualDay = m => Object.keys(settings.moduleDays || {}).find(d => settings.moduleDays[d] === m.id) ?? ''
+    const setUsualDay = (m, weekday) => saveSetting('moduleDays', swapModuleDay(settings.moduleDays || {}, m.id, Number(weekday)))
 
     const device = deviceZone()
     const zoneName = z => z === defaultZone ? 'UK time' : z.replace(/_/g, ' ').replace(/\//g, ', ')
@@ -349,10 +357,10 @@ export default {
     }
 
     return {
-      settings, exceptions, blocked, modeHints, dayRows, editDay, device, defaultZone, zoneName, themes,
+      settings, exceptions, blocked, modeHints, currentModules, studyWeekdays, usualDay, setUsualDay, device, defaultZone, zoneName, themes,
       reminderError, driveError, restoreMode, restoreMessage, restoreFailed, syncState, syncText,
       canNotify, toggleReminders, drive, connectDrive, reconnectDrive, disconnectDrive, syncNow, useDriveCopy, combineWithDrive, cancelConnect,
-      driveAvailable, downloadBackup, restore, dayNames, weekOrder, put, update, addException, addBlocked, setRepeat, remove
+      driveAvailable, downloadBackup, restore, dayNames, weekOrder, put, update, addException, addBlocked, setRepeat, removeWithUndo, install, installApp
     }
   }
 }

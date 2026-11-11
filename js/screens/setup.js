@@ -5,6 +5,7 @@ import { shortDate } from '../time.js'
 import ModuleForm from '../components/module-form.js'
 import AssessmentForm from '../components/assessment-form.js'
 import WorkPattern from '../components/work-pattern.js'
+import StudyDays from '../components/study-days.js'
 import CapacityNote from '../components/capacity-note.js'
 
 const { ref, computed } = Vue
@@ -12,7 +13,7 @@ const { ref, computed } = Vue
 const typeNames = { tma: 'TMA', ema: 'EMA', exam: 'Exam' }
 
 export default {
-  components: { ModuleForm, AssessmentForm, WorkPattern, CapacityNote },
+  components: { ModuleForm, AssessmentForm, WorkPattern, StudyDays, CapacityNote },
   template: `
     <section class="setup">
       <h1>Set up your planner</h1>
@@ -20,6 +21,7 @@ export default {
         <li :class="{ current: step === 1 }">Modules</li>
         <li :class="{ current: step === 2 }">Assessments</li>
         <li :class="{ current: step === 3 }">Work pattern</li>
+        <li :class="{ current: step === 4 }">Study times</li>
       </ol>
 
       <template v-if="step === 1">
@@ -69,13 +71,22 @@ export default {
         </div>
       </template>
 
-      <template v-else>
+      <template v-else-if="step === 3">
         <p>Add the shifts you work in a normal week. Holidays and swaps go in Settings later.</p>
         <div class="card"><WorkPattern /></div>
+        <div class="actions spaced">
+          <button class="primary" @click="step = 4">Next</button>
+          <button @click="step = 2">Back</button>
+        </div>
+      </template>
+
+      <template v-else>
+        <p>Tick the days you study, when you're free on them and the most you'd do in a day. Study is only planned inside these times, and you can change them in Settings.</p>
+        <div class="card"><StudyDays /></div>
         <CapacityNote show-ok />
         <div class="actions spaced">
           <button class="primary" @click="finish">Finish</button>
-          <button @click="step = 2">Back</button>
+          <button @click="step = 3">Back</button>
         </div>
       </template>
     </section>`,

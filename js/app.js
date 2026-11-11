@@ -11,6 +11,7 @@ import { startReminders } from './notify.js'
 import { startAutoPlan } from './autoplan.js'
 import { update, startUpdates, applyUpdate } from './updates.js'
 import { downloadBackup } from './backup.js'
+import { undo, undoLast } from './undo.js'
 
 const { createApp, ref, computed } = Vue
 
@@ -32,6 +33,11 @@ const App = {
   template: `
     <header class="top">
       <a href="#/today" class="brand">OU Study Planner</a>
+      <span v-if="syncText && !inSetup" class="sync">
+        <button v-if="syncState.status === 'signed-out'" class="link" @click="reconnect">Sync paused, reconnect</button>
+        <a v-else-if="syncState.status === 'error'" href="#/settings">Sync problem</a>
+        <template v-else>{{ syncText }}</template>
+      </span>
       <nav v-if="!inSetup">
         <a v-for="link in links" :href="'#/' + link.path" :class="{ active: section === link.path }">{{ link.name }}</a>
       </nav>
@@ -42,14 +48,16 @@ const App = {
       <button class="link" @click="downloadBackup">Download a backup first</button>
       <button class="link" @click="update.later = true">Later</button>
     </div>
-    <div v-if="syncState.status === 'signed-out' && !inSetup" class="banner">
-      <span>Google Drive sync is paused.</span>
-      <button class="link" @click="reconnect">Reconnect</button>
-      <span v-if="reconnectError" class="error">{{ reconnectError }}</span>
+    <div v-if="reconnectError && !inSetup" class="banner">
+      <span class="error">{{ reconnectError }}</span>
     </div>
     <main>
       <component :is="current" :key="hash" v-bind="props" />
-    </main>`,
+    </main>
+    <div v-if="undo.text" class="toast" role="status">
+      <span>{{ undo.text }}</span>
+      <button class="link" @click="undoLast">Undo</button>
+    </div>`,
   setup() {
     const parts = computed(() => hash.value.replace(/^#\/?/, '').split('/'))
     const name = computed(() => screens[parts.value[0]] ? parts.value[0] : 'today')
@@ -60,6 +68,14 @@ const App = {
 
     // assessment pages sit under modules in the nav
     const section = computed(() => name.value === 'assessment' ? 'modules' : name.value)
+
+    // a quiet line in the header, as google's sign in runs out every hour and a warning each time is too much
+    const syncText = computed(() => {
+      if (!settings.driveSync || syncState.status === 'off' || syncState.status === 'choosing') return ''
+      if (syncState.status === 'syncing') return 'Syncing...'
+      if (syncState.status === 'waiting' && syncState.last) return `Synced ${syncState.last.toLocaleTimeString('en-GB', { timeZone: settings.timeZone, hour: '2-digit', minute: '2-digit' })}`
+      return 'Sync on'
+    })
 
     // sign in popup has to come from a click
     const reconnectError = ref('')
@@ -72,7 +88,7 @@ const App = {
       }
     }
 
-    return { links, hash, current, props, section, inSetup, syncState, reconnect, reconnectError, update, applyUpdate, downloadBackup }
+    return { links, hash, current, props, section, inSetup, syncState, syncText, reconnect, reconnectError, update, applyUpdate, downloadBackup, undo, undoLast }
   }
 }
 

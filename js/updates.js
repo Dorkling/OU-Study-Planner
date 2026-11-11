@@ -33,6 +33,27 @@ export async function startUpdates() {
   })
 }
 
+// chrome and edge offer to install the app, the offer is kept until the person asks for it
+export const install = reactive({ ready: false })
+
+let installOffer
+
+window.addEventListener('beforeinstallprompt', event => {
+  event.preventDefault()
+  installOffer = event
+  install.ready = true
+})
+
+window.addEventListener('appinstalled', () => { install.ready = false })
+
+export async function installApp() {
+  if (!installOffer) return
+  installOffer.prompt()
+  await installOffer.userChoice
+  installOffer = null
+  install.ready = false
+}
+
 export function applyUpdate() {
   update.accepted = true
   registration?.waiting?.postMessage('update')

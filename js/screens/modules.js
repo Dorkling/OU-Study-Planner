@@ -1,4 +1,5 @@
-import { all, save, remove, live } from '../db.js'
+import { all, save, live } from '../db.js'
+import { removeWithUndo } from '../undo.js'
 import { weeklyHours, oneDecimal } from '../estimates.js'
 import { settings } from '../settings.js'
 import { shortDate, dateAndTime, dateKey, addDaysToKey, startOfDay } from '../time.js'
@@ -68,7 +69,7 @@ export default {
               <input type="checkbox" @change="save('tasks', { ...t, status: 'done' })" :aria-label="'Done: ' + t.title">
               <span class="grow">{{ t.title }}</span>
               <span class="hint">{{ oneDecimal(t.est_hours) }} h</span>
-              <button class="link danger" @click="remove('tasks', t.id)">Remove</button>
+              <button class="link danger" @click="removeWithUndo('tasks', t.id, 'Removed ' + t.title + '.')">Remove</button>
             </div>
           </div>
 
@@ -171,7 +172,7 @@ export default {
 
     return {
       editing, addingTo, message, importError, modules, assessmentsFor, todosFor, weekly, dueText, typeNames,
-      shortDate, oneDecimal, save, remove, markSubmitted, catchForm, catchingUpNow, untilOptions, openCatchUp, confirmCatchUp, stopCatchUp, saveModule, deleteModule, addAssessment, share, importModule
+      shortDate, oneDecimal, save, removeWithUndo, markSubmitted, catchForm, catchingUpNow, untilOptions, openCatchUp, confirmCatchUp, stopCatchUp, saveModule, deleteModule, addAssessment, share, importModule
     }
   }
 }

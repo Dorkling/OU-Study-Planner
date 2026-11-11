@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto, assignDays, queuedWork, studyFirst, joinTouching, joinDropped, packDays, weekdayOwners, overdueWork } from '../js/planner.js'
+import { partEstimates, assessmentHours, getNeeds, planBlocks, getModuleNeeds, planWeek, defaultHours, checkRisks, findClashes, planWeeks, weeksToEnd, capacityCheck, bookableHours, catchUpHours, replanAuto, assignDays, queuedWork, studyFirst, joinTouching, joinDropped, packDays, weekdayOwners, overdueWork, swapModuleDay } from '../js/planner.js'
 
-import { zonedTime } from '../js/time.js'
+import { zonedTime, dateKey, clockTime } from '../js/time.js'
 import { dayPlan } from '../js/freetime.js'
 
 // october 2026 in uk time, the clocks go back on the 25th
@@ -791,4 +791,26 @@ test('a confirmed exam day is kept clear, a rough one is not', () => {
   const onExamDay = blocks => blocks.filter(b => new Date(b.start) >= at(14, 0) && new Date(b.start) < at(15, 0)).length
   assert.equal(onExamDay(planWeek({ ...emptyWeek, assessments: [exam] }, planSettings, at(12, 8), at(12, 8)).blocks), 0)
   assert.ok(onExamDay(planWeek({ ...emptyWeek, assessments: [{ ...exam, provisional: true }] }, planSettings, at(12, 8), at(12, 8)).blocks) > 0)
+})
+
+test('giving a module a usual day swaps it with whatever had that day', () => {
+  assert.deepEqual(swapModuleDay({ 1: 'A', 2: 'B' }, 'A', 2), { 1: 'B', 2: 'A' })
+  assert.deepEqual(swapModuleDay({ 1: 'A', 2: 'B' }, 'A', 4), { 2: 'B', 4: 'A' })
+  assert.deepEqual(swapModuleDay({ 2: 'B' }, 'A', 2), { 2: 'A' })
+  assert.deepEqual(swapModuleDay({ 1: 'A' }, 'A', 1), { 1: 'A' })
+})
+
+test('time kept free after removing an auto block is not booked again', () => {
+  const autoSettings = { ...planSettings, plannerMode: 'auto' }
+  const planned = planWeeks(emptyWeek, autoSettings, at(12, 8), at(12, 8), 1).blocks
+  const gone = planned.find(b => new Date(b.start) > at(13, 0))
+
+  // without anything in the way the same block comes straight back
+  const without = planned.filter(b => b.id !== gone.id)
+  assert.ok(replanAuto({ ...emptyWeek, blocks: without }, autoSettings, at(12, 8)).blocks.some(b => b.id === gone.id))
+
+  const zone = 'Europe/London'
+  const keptFree = { label: 'Kept free', date: dateKey(new Date(gone.start), zone), start: clockTime(new Date(gone.start), zone), end: clockTime(new Date(gone.end), zone) }
+  const after = replanAuto({ ...emptyWeek, blocked: [keptFree], blocks: without }, autoSettings, at(12, 8)).blocks
+  assert.ok(after.every(b => new Date(b.end) <= new Date(gone.start) || new Date(b.start) >= new Date(gone.end)))
 })
